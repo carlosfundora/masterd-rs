@@ -2,7 +2,7 @@
   "inference_ok": true,
   "retrieval_ok": true,
   "thinking_ok": true,
-  "inferred_tokens_per_sec": 74639.39840644885,
+  "inferred_tokens_per_sec": 109938.43447669304,
   "notes": [
     "backend=Direct",
     "inference dims: jina=384",

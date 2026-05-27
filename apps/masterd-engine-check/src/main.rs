@@ -39,6 +39,12 @@ struct Cli {
     /// Write the benchmark report here.
     #[arg(long, default_value = "data/benchmarks/real_benchmarks.json")]
     benchmark_output: String,
+    /// Limit how many PDF files are included in the benchmark corpus.
+    #[arg(long, default_value_t = 2)]
+    benchmark_pdf_limit: usize,
+    /// Limit how many chat questions are used in the benchmark.
+    #[arg(long, default_value_t = 4)]
+    benchmark_question_limit: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -265,9 +271,9 @@ fn run_direct_thinking_check(engine: &EmbeddedEngine) -> Result<String> {
 }
 
 fn run_real_benchmark(cli: &Cli) -> Result<RealBenchmarkReport> {
-    let corpus = build_benchmark_corpus(&cli.docs_root, &cli.pdf_root)?;
+    let corpus = build_benchmark_corpus(&cli.docs_root, &cli.pdf_root, cli.benchmark_pdf_limit)?;
     let ingest = benchmark_ingest(&corpus.inputs)?;
-    let chat = benchmark_chat_models(&corpus.unique_docs)?;
+    let chat = benchmark_chat_models(&corpus.unique_docs, cli.benchmark_question_limit)?;
     Ok(RealBenchmarkReport {
         corpus: corpus.report,
         ingest,
@@ -287,7 +293,7 @@ struct BenchmarkDoc {
     text: String,
 }
 
-fn build_benchmark_corpus(docs_root: &Path, pdf_root: &Path) -> Result<BenchmarkCorpus> {
+fn build_benchmark_corpus(docs_root: &Path, pdf_root: &Path, pdf_limit: usize) -> Result<BenchmarkCorpus> {
     let mut inputs = Vec::new();
 
     let doc_candidates = [
@@ -309,7 +315,7 @@ fn build_benchmark_corpus(docs_root: &Path, pdf_root: &Path) -> Result<Benchmark
         .filter(|path| path.is_file() && path.extension().and_then(|ext| ext.to_str()).map(|ext| ext.eq_ignore_ascii_case("pdf")).unwrap_or(false))
         .collect::<Vec<_>>();
     pdf_candidates.sort();
-    pdf_candidates.truncate(4);
+    pdf_candidates.truncate(pdf_limit.max(1));
     inputs.extend(pdf_candidates.iter().cloned());
 
     if let Some(first_doc) = inputs.first().cloned() {
@@ -490,11 +496,11 @@ fn benchmark_questions() -> Vec<BenchmarkQuestion> {
     ]
 }
 
-fn benchmark_chat_models(unique_docs: &[BenchmarkDoc]) -> Result<Vec<ChatModelBenchmark>> {
+fn benchmark_chat_models(unique_docs: &[BenchmarkDoc], question_limit: usize) -> Result<Vec<ChatModelBenchmark>> {
     let rt = tokio::runtime::Runtime::new()?;
-    let questions = benchmark_questions();
+    let questions = benchmark_questions().into_iter().take(question_limit.max(1)).collect::<Vec<_>>();
     let mut chat_engine_cfg = ChatEngineConfig::default();
-    chat_engine_cfg.max_new_tokens = 96;
+    chat_engine_cfg.max_new_tokens = 64;
     chat_engine_cfg.temperature = 0.2;
     let engine = Arc::new(ChatEngine::new(chat_engine_cfg));
     engine.preload()?;
