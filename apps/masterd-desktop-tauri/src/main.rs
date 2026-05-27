@@ -862,6 +862,17 @@ fn main() {
                 handle.state::<AppState>().init_dirs(dirs).await;
             });
 
+            // Preload LFM2.5 models asynchronously in a separate OS thread to avoid blocking Tauri GUI startup.
+            let chat_engine = app.state::<AppState>().chat_engine.clone();
+            std::thread::spawn(move || {
+                tracing::info!("Pre-warming LFM2.5 thinking and instruct models...");
+                if let Err(e) = chat_engine.preload() {
+                    tracing::error!("Failed to preload LFM2.5 models: {e}");
+                } else {
+                    tracing::info!("LFM2.5 models preloaded successfully");
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

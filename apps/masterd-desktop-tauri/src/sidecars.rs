@@ -45,6 +45,21 @@ pub struct SidecarSupervisor {
     procs: Arc<Mutex<Vec<ManagedProcess>>>,
 }
 
+fn find_workspace_root() -> Option<PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join("services").join("colbert-service").exists() {
+            return Some(dir);
+        }
+        if let Some(parent) = dir.parent() {
+            dir = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    None
+}
+
 impl SidecarSupervisor {
     pub fn new() -> Self {
         Self::default()
@@ -56,6 +71,55 @@ impl SidecarSupervisor {
         self.start_meilisearch(resource_dir, data_dir);
         self.start_valkey(resource_dir, data_dir);
         self.start_falkordb(resource_dir, data_dir);
+        self.start_python_services();
+    }
+
+    fn start_python_services(&self) {
+        let procs = self.procs.lock().unwrap();
+        if procs.iter().any(|p| p.name == "colbert-service" || p.name == "jina-service" || p.name == "qwen3-service") {
+            return;
+        }
+        drop(procs);
+
+        if let Some(root) = find_workspace_root() {
+            info!("found workspace root at {}, starting python embedding services...", root.display());
+            self.start_python_service("colbert-service", &root, 11450);
+            self.start_python_service("jina-service", &root, 11447);
+            self.start_python_service("qwen3-service", &root, 11502);
+        } else {
+            warn!("could not locate workspace root, python embedding services will not be started automatically");
+        }
+    }
+
+    fn start_python_service(&self, name: &'static str, root: &Path, port: u16) {
+        let service_dir = root.join("services").join(name);
+        let bin = service_dir.join(".venv").join("bin").join("python");
+        let script = service_dir.join("server.py");
+
+        if !bin.exists() {
+            warn!("python binary not found at {}, skipping {name}", bin.display());
+            return;
+        }
+        if !script.exists() {
+            warn!("server script not found at {}, skipping {name}", script.display());
+            return;
+        }
+
+        let child = Command::new(&bin)
+            .arg(&script)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+
+        match child {
+            Ok(c) => {
+                info!("{name} started on port {port}");
+                self.procs.lock().unwrap().push(ManagedProcess { name, child: c });
+            }
+            Err(e) => {
+                warn!("failed to start {name}: {e}");
+            }
+        }
     }
 
     fn start_meilisearch(&self, resource_dir: &Path, data_dir: &Path) {

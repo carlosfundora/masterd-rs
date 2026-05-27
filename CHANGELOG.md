@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2026-05-27
+
+### Added
+- Configured Tauri desktop UI startup lifecycle to automatically spawn supervised Python FastAPI processes for the local embedding and ColBERT reranker services (`colbert-service`, `jina-service`, `qwen3-service`).
+- Implemented background preloading of embedded LFM2.5 thinking and instruct models on Tauri setup, eliminating first-message response latency.
+
 ## [0.1.0] - 2026-05-26
 
 ### Added

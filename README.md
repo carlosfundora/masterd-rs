@@ -125,6 +125,11 @@ Pipeline stages (configurable in `config/pipeline.toml`):
 
 The embedding services run as separate HTTP processes. The main installer sets them up by default, including Jina model prefetch. All installs are routed through the AMD ROCm PyTorch index — no CUDA wheels are permitted.
 
+> [!NOTE]
+> Whenever the Tauri desktop UI is launched, it automatically starts the embedding services (ColBERT, Jina, Qwen3) as supervised processes and preloads the embedded LFM2.5 thinking and instruct models.
+> 
+> You can also start the services manually for CLI tools or development:
+
 ```bash
 # Set up all three service venvs (Python 3.12 + ROCm torch)
 ./scripts/setup-embedding-services.sh all
@@ -132,7 +137,7 @@ The embedding services run as separate HTTP processes. The main installer sets t
 # Skip embedding-service setup during installer builds only when needed:
 MASTERD_SKIP_EMBEDDING_SERVICES=1 ./scripts/build-installer-bundles.sh
 
-# Start a service
+# Start a service manually
 services/colbert-service/.venv/bin/python services/colbert-service/server.py
 services/jina-service/.venv/bin/python    services/jina-service/server.py
 services/qwen3-service/.venv/bin/python   services/qwen3-service/server.py
