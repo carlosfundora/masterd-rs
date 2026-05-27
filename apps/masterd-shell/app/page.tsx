@@ -13,7 +13,7 @@ import {
   PipelineJob, ReviewItem, AutomationRule, AuditEntry, MasterdFrontendBridge
 } from "../contracts/api";
 
-// Bridge (auto-selects Tauri real or mock)
+// Bridge (live Tauri runtime only)
 import { getBridge } from "../lib/tauri-bridge";
 
 // Subcomponents
@@ -27,6 +27,8 @@ import AuditLog from "../components/AuditLog";
 import SettingsScreen from "../components/Settings";
 import ChatPanel from "../components/ChatPanel";
 import WelcomeTour from "../components/WelcomeTour";
+
+const ONBOARDING_STORAGE_KEY = "masterd:onboarding:v1-complete";
 
 export default function Home() {
   const [bridge, setBridge] = useState<MasterdFrontendBridge | null>(null);
@@ -132,9 +134,17 @@ export default function Home() {
     };
   }, [refreshState]);
 
+  useEffect(() => {
+    if (!initLoaded || runtimeError) return;
+    if (typeof window === "undefined") return;
+
+    const completed = window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === "true";
+    setTutorialOpen(!completed);
+  }, [initLoaded, runtimeError]);
+
   const closeTutorial = useCallback(() => {
     if (typeof window !== "undefined") {
-      window.localStorage.setItem("masterd:onboarding:v1-complete", "true");
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
     }
     setTutorialOpen(false);
   }, []);

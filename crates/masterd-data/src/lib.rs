@@ -1327,9 +1327,9 @@ impl DataStore {
             0.0
         };
         let volume = (count as f32 / 5.0).min(1.0);
-        let confidence = ((agreement * 0.65) + (avg_positive * 0.25) + (volume * 0.10)).clamp(0.0, 1.0);
         let opposition_ratio = if total > 0.0 { opposition / total } else { 0.0 };
-        let status = if confidence >= 0.80 && positive_events >= 3 && opposition_ratio < 0.35 {
+        let confidence = ((agreement * 0.65) + (avg_positive * 0.25) + (volume * 0.10) - (opposition_ratio * 0.15)).clamp(0.0, 1.0);
+        let status = if confidence >= 0.80 && positive_events >= 3 && opposition_ratio < 0.20 {
             "pending_review"
         } else {
             "learning"

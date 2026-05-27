@@ -89,69 +89,43 @@ export default function Rules({
 
   const handleSimulateDeploy = async () => {
     if (!selectedSimDocId || !selectedSimRuleId) {
-      setSimLog(["[ABORT] Select both a document and a rule to evaluate simulation."]);
+      setSimLog(["[ABORT] Select both a document and a rule to evaluate the live check."]);
+      return;
+    }
+
+    if (!bridge) return;
+
+    const doc = documents.find(d => d.id === selectedSimDocId);
+    const rule = rules.find(r => r.id === selectedSimRuleId);
+    if (!doc || !rule) {
+      setSimLog(["[FATAL] Selected rule or document is unavailable in the live workspace."]);
       return;
     }
 
     setSimRunning(true);
-    setSimLog(["[INIT] Awaiting sandbox rule thread initialization...", "[OK] Memory sandbox locks obtained."]);
+    setSimLog(["[INIT] Dispatching live rule evaluation against the selected document..."]);
 
-    const doc = documents.find(d => d.id === selectedSimDocId);
-    const rule = rules.find(r => r.id === selectedSimRuleId);
+    const res = await bridge.rules.test({
+      name: rule.name,
+      description: rule.description,
+      enabled: rule.enabled,
+      priority: rule.priority,
+      trigger: rule.trigger,
+      conditions: rule.conditions,
+      actions: rule.actions,
+      safetyLevel: rule.safetyLevel
+    }, selectedSimDocId);
 
-    if (!doc || !rule) {
-      setSimLog(prev => [...prev, "[FATAL] Index file not found in context database."]);
-      setSimRunning(false);
-      return;
-    }
-
-    // Step-by-step diagnostic compilation
-    setTimeout(() => {
-      setSimLog(prev => [
-        ...prev,
-        `[EVAL] Starting simulation on target object: "${doc.currentName}"`,
-        `[RULES] Matching rule trigger event trigger: [${rule.trigger.event}]`,
-        `[RULES] Trigger evaluation logic SUCCESS.`
+    if (res.ok) {
+      setSimLog([
+        `[LIVE] Rule test completed for "${doc.currentName}"`,
+        `[MATCH] ${res.data.matched ? "Rule matched" : "Rule did not match"}`,
+        ...res.data.actionsEvaluated.map(action => `[ACTION] ${action.type}: ${action.resultSummary}`)
       ]);
-
-      setTimeout(() => {
-        const cond = rule.conditions[0];
-        setSimLog(prev => [
-          ...prev,
-          `[CONDITIONS] Evaluating Rule Condition [${cond.field} ${cond.operator} "${cond.value}"]`,
-          `[EVAL] File category resolved: "${doc.classification?.category || 'Uncategorized'}"`
-        ]);
-
-        // Simulating the condition evaluation check
-        const isMatch = doc.classification?.category?.toLowerCase().includes(String(cond.value).toLowerCase());
-        
-        setTimeout(() => {
-          if (isMatch) {
-            const act = rule.actions[0];
-            setSimLog(prev => [
-              ...prev,
-              `[PASS] Conditions evaluated: TRUE. Executing actions workflow.`,
-              `[EXEC] Initializing Action block: [${act.type}]`,
-              act.type === "suggest_rename" 
-                ? `[OUTPUT] Computed filename proposal: "2026-05-26_legal_notice_${doc.originalName}"`
-                : act.type === "suggest_tag"
-                ? `[OUTPUT] Appending tag indicator to indices: "${(act as any).tag || 'finance'}"`
-                : `[OUTPUT] Target file routing matched directory folder: "${(act as any).destinationFolder || 'TaxArchive'}"`,
-              `[STATUS] Pipeline dry-run completed with priority state: (${rule.priority})`,
-              `[SUCCESS] Simulation run finalized without errors.`
-            ]);
-          } else {
-            setSimLog(prev => [
-              ...prev,
-              `[FAIL] Conditions evaluated: FALSE. (Rule did not match document criteria)`,
-              `[ABORT] Skipping action workflow blocks. No changes simulated.`,
-              `[SUCCESS] Simulation evaluation finished.`
-            ]);
-          }
-          setSimRunning(false);
-        }, 1000);
-      }, 1000);
-    }, 8000); // 800ms
+    } else {
+      setSimLog([`[ERROR] ${res.error.code}: ${res.error.message}`]);
+    }
+    setSimRunning(false);
   };
 
   return (
@@ -382,19 +356,19 @@ export default function Rules({
           </div>
         </div>
 
-        {/* Rule Dry Run Simulator */}
+        {/* Live Rule Test */}
         <div id="rule-dryrun-simulator" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4 flex flex-col h-[525px]">
           <div className="border-b border-[#183040] pb-3">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-green-400" /> Dry-Run Rule Simulator
+              <Terminal className="w-4 h-4 text-green-400" /> Live Rule Test
             </h2>
           </div>
 
           <p className="text-xs text-[#A7C7D9] shrink-0">
-            A dry run simulates trigger conditions against the document library. Perfect for debugging complex file templates.
+            Run the selected rule against a live document and inspect the bridge response.
           </p>
 
-          {/* Simulator forms */}
+          {/* Live test forms */}
           <div className="space-y-2 text-xs shrink-0 bg-[#05070A] p-3 rounded-[4px] border border-[#183040]/70">
             <div className="space-y-1">
               <label className="text-[10px] font-mono text-[#6C8798]">Select Target Document</label>
@@ -425,14 +399,14 @@ export default function Rules({
               disabled={simRunning}
               className="w-full mt-2.5 py-1.5 bg-green-500 hover:bg-green-600 text-white font-mono rounded-[4px] flex items-center justify-center gap-1.5 font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-[11px]"
             >
-              <Play className="w-3.5 h-3.5" /> deploy simulation run
+              <Play className="w-3.5 h-3.5" /> run live rule test
             </button>
           </div>
 
-          {/* Terminal logger screen output */}
+          {/* Live test output */}
           <div className="flex-1 bg-black p-3.5 font-mono text-[10px] text-[#A7C7D9] rounded-[4px] border border-[#183040] overflow-y-auto leading-relaxed scrollbar-thin max-h-[220px]">
             <div className="text-green-400 font-bold uppercase text-[9px] border-b border-[#183040] pb-1 mb-1.5 flex justify-between">
-              <span>SIMULATED PROCESS FLOW DEBUG</span>
+              <span>LIVE RULE TEST OUTPUT</span>
               <span>STATE</span>
             </div>
             {simLog.map((log, i) => (
@@ -442,10 +416,10 @@ export default function Rules({
               </div>
             ))}
             {simLog.length === 0 && (
-              <p className="text-[#3E5360] italic text-center py-10">Select files to generate simulation analysis outputs</p>
+              <p className="text-[#3E5360] italic text-center py-10">Select a document and rule to run the live evaluation</p>
             )}
             {simRunning && (
-              <p className="text-[#fca5a5] font-bold animate-pulse mt-1">█ evaluating rules engines structures...</p>
+              <p className="text-[#fca5a5] font-bold animate-pulse mt-1">█ evaluating live rule logic...</p>
             )}
           </div>
 

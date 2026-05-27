@@ -56,7 +56,7 @@ export default function Pipeline({
   return (
     <div id="pipeline-screen" className="space-y-6 text-[#E6F7FF]">
       
-      {/* Top Banner: Local Sandbox Workers & Health */}
+      {/* Top Banner: Local Workers & Health */}
       <div id="workers-grid-layout" className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Worker 1 Console Status */}
@@ -65,7 +65,7 @@ export default function Pipeline({
           <div className="flex justify-between items-center text-xs">
             <span className="font-mono text-[#6C8798]">THREAD PROCESSOR 01</span>
             <span className="text-green-400 font-mono flex items-center gap-1.5 font-bold">
-              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulseinline-block" /> ONLINE
+              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse inline-block" /> ONLINE
             </span>
           </div>
 
@@ -111,14 +111,14 @@ export default function Pipeline({
           </div>
         </div>
 
-        {/* Sandbox worker orchestration info */}
+        {/* Local worker orchestration info */}
         <div className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] flex flex-col justify-between">
           <div>
             <h4 className="text-xs uppercase font-mono tracking-wider font-bold text-[#6C8798] flex items-center gap-1.5">
-              <Workflow className="w-4 h-4 text-[#fca5a5]" /> Local Worker Sandbox
+              <Workflow className="w-4 h-4 text-[#fca5a5]" /> Local Worker Fleet
             </h4>
             <p className="text-[11px] text-[#A7C7D9] mt-2.5 leading-relaxed">
-              MASTERd utilizes standard concurrent worker loops running isolated within browser sandbox sandboxes. No personal data ever exits your system.
+              MASTERd runs its worker loops locally through the live desktop backend. No personal data ever exits your system.
             </p>
           </div>
           <div className="text-[10px] text-[#fca5a5] font-mono border-t border-[#183040] pt-2 mt-2">

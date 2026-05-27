@@ -528,7 +528,7 @@ export default function Documents({
                   <div className="aspect-video relative bg-[#0B1018] border border-[#183040] rounded-[4px] mt-2 flex flex-col items-center justify-center overflow-hidden">
                     <div className="absolute inset-0 bg-[radial-gradient(#1e3040_1px,transparent_1px)] [background-size:12px_12px] opacity-20" />
                     <FileText className="w-10 h-10 text-[#fca5a5]/40 mb-1" />
-                    <span className="font-mono text-[9px] text-[#6C8798] uppercase">Secure local visual sandbox</span>
+                    <span className="font-mono text-[9px] text-[#6C8798] uppercase">Secure local document ledger</span>
                   </div>
                 </div>
               </div>
