@@ -1290,7 +1290,7 @@ impl DataStore {
             |row| Ok((row.get(0)?, row.get::<_, Option<f64>>(1)?.unwrap_or(0.0))),
         )?;
         let confidence = ((count as f32 / 5.0).min(1.0) * 0.4) + ((avg as f32).clamp(0.0, 1.0) * 0.6);
-        let status = if confidence >= 0.82 && count >= 3 { "pending_review" } else { "learning" };
+        let status = if confidence >= 0.80 && count >= 3 { "pending_review" } else { "learning" };
         let id = stable_id("pref", format!("{category}:{signal}:{value}").as_bytes());
         let created_at = now();
         conn.execute(
@@ -1639,6 +1639,30 @@ fn chunk_by_semantic_token_budget(text: &str, target_tokens: usize, overlap_toke
     for unit in units {
         let tokens = unit.split_whitespace().collect::<Vec<_>>();
         if tokens.is_empty() {
+            continue;
+        }
+        if tokens.len() > target {
+            if !current_tokens.is_empty() {
+                let end_token = cursor;
+                chunks.push((current_tokens.join(" "), start_token, end_token));
+                current_tokens.clear();
+            }
+            let step = target.saturating_sub(overlap).max(1);
+            let mut local_start = 0usize;
+            while local_start < tokens.len() {
+                let local_end = (local_start + target).min(tokens.len());
+                chunks.push((
+                    tokens[local_start..local_end].join(" "),
+                    cursor + local_start,
+                    cursor + local_end,
+                ));
+                if local_end == tokens.len() {
+                    break;
+                }
+                local_start += step;
+            }
+            cursor += tokens.len();
+            start_token = cursor;
             continue;
         }
         if !current_tokens.is_empty() && current_tokens.len() + tokens.len() > target {
