@@ -92,6 +92,7 @@ impl SidecarSupervisor {
 
         // Check for FalkorDB module.
         let module_path = resource_dir.join("modules").join("falkordb.so");
+        let module_path = module_path.canonicalize().unwrap_or(module_path);
         let mut args: Vec<String> = vec![
             "--port".into(), "6399".into(),
             "--dir".into(), db_path.to_string_lossy().into_owned(),
