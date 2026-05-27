@@ -1,6 +1,6 @@
 /**
  * Real Tauri v2 bridge using @tauri-apps/api/core invoke.
- * Auto-detects the Tauri runtime. Falls back to mockBridge in browser dev.
+ * Requires the live Tauri runtime; there is no mock fallback.
  */
 
 import type {
@@ -143,12 +143,7 @@ export async function startChat(
   onToken: (token: ChatStreamToken) => void
 ): Promise<() => void> {
   if (!isTauri()) {
-    // Dev fallback: simulate a response
-    setTimeout(() => {
-      onToken({ type: "response", text: "MASTERd chat engine is not yet connected in browser dev mode." });
-      onToken({ type: "done", citations: [] });
-    }, 500);
-    return () => {};
+    throw new Error("MASTERd chat requires the live Tauri desktop runtime.");
   }
 
   const { listen } = await import("@tauri-apps/api/event");
@@ -169,11 +164,10 @@ export async function startChat(
   return () => unlisten();
 }
 
-// ── Exported bridge (auto-selects real or mock) ────────────────────────────────
+// ── Exported bridge (live only) ────────────────────────────────────────────────
 export async function getBridge(): Promise<MasterdFrontendBridge> {
-  if (isTauri()) return tauriBridge;
-
-  // Lazy-import mock to avoid bundling it in production Tauri builds
-  const { mockBridge } = await import("./mock-bridge");
-  return mockBridge;
+  if (!isTauri()) {
+    throw new Error("MASTERd requires the live Tauri desktop runtime.");
+  }
+  return tauriBridge;
 }

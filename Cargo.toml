@@ -8,6 +8,7 @@ exclude = [
 members = [
     "crates/masterd-chat-engine",
     "crates/masterd-core",
+    "crates/masterd-data",
     "crates/masterd-index",
     "crates/masterd-midi",
     "crates/masterd-embed-engine",
