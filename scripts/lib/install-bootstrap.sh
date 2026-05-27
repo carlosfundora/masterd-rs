@@ -55,6 +55,17 @@ masterd_download_atomic() {
   mv "${tmp}" "${dest}"
 }
 
+masterd_without_python_index_env() {
+  env \
+    -u UV_EXTRA_INDEX_URL \
+    -u UV_INDEX_URL \
+    -u UV_CONSTRAINT \
+    -u PIP_EXTRA_INDEX_URL \
+    -u PIP_INDEX_URL \
+    -u PIP_CONSTRAINT \
+    "$@"
+}
+
 masterd_ensure_uv() {
   masterd_init_bootstrap "$1"
   if command -v uv >/dev/null 2>&1; then
@@ -64,8 +75,7 @@ masterd_ensure_uv() {
 
   command -v curl >/dev/null 2>&1 || masterd_die "curl is required to install uv"
   masterd_log "uv not found; installing uv for this user"
-  env -u UV_EXTRA_INDEX_URL -u PIP_EXTRA_INDEX_URL -u PIP_CONSTRAINT -u UV_CONSTRAINT \
-    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
+  masterd_without_python_index_env curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
   masterd_prepend_path "${HOME}/.local/bin"
   masterd_prepend_path "${HOME}/.cargo/bin"
 
@@ -97,10 +107,8 @@ masterd_resolve_python() {
   fi
 
   masterd_ensure_uv "$1"
-  env -u UV_EXTRA_INDEX_URL -u PIP_EXTRA_INDEX_URL -u PIP_CONSTRAINT -u UV_CONSTRAINT \
-    "${MASTERD_UV_BIN}" python install 3.12
-  MASTERD_PYTHON_BIN="$(env -u UV_EXTRA_INDEX_URL -u PIP_EXTRA_INDEX_URL -u PIP_CONSTRAINT -u UV_CONSTRAINT \
-    "${MASTERD_UV_BIN}" python find 3.12)"
+  masterd_without_python_index_env "${MASTERD_UV_BIN}" python install 3.12
+  MASTERD_PYTHON_BIN="$(masterd_without_python_index_env "${MASTERD_UV_BIN}" python find 3.12)"
   [[ -x "${MASTERD_PYTHON_BIN}" ]] || masterd_die "uv could not provide Python 3.12"
 }
 

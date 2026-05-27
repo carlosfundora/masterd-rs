@@ -24,6 +24,8 @@ export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
 
 ROCM_TORCH_INDEX_NIGHTLY="${ROCM_TORCH_INDEX_NIGHTLY:-https://download.pytorch.org/whl/nightly/rocm6.3}"
 ROCM_TORCH_INDEX_STABLE="${ROCM_TORCH_INDEX_STABLE:-https://download.pytorch.org/whl/rocm6.2.4}"
+unset UV_EXTRA_INDEX_URL UV_INDEX_URL UV_CONSTRAINT
+unset PIP_EXTRA_INDEX_URL PIP_INDEX_URL PIP_CONSTRAINT
 
 # Block CUDA wheels globally via the project constraints file.
 ROCM_CONSTRAINTS="${ROOT_DIR}/config/rocm-constraints.txt"
