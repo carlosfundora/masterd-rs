@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../masterd-shell/out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "masterd-desktop-tauri/dev-shell.sh",
-    "beforeBuildCommand": "masterd-desktop-tauri/build-shell.sh"
+    "beforeDevCommand": "./dev-shell.sh",
+    "beforeBuildCommand": "./build-shell.sh"
   },
   "app": {
     "windows": [

@@ -75,6 +75,10 @@ vendor/
 - **uv** — `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - **AMD ROCm 6.x or 7.x** runtime
 
+### Linux desktop libraries
+
+The launcher now bootstraps missing native GUI/build dependencies on Linux automatically the first time you run it. That includes the Tauri/WebKitGTK stack, `pkg-config`, `patchelf`, and the usual GTK/WebKit support libraries.
+
 ## Quick start
 
 ```bash
@@ -95,11 +99,12 @@ export HF_TOKEN=hf_your_token_here  # required for gated Liquid AI repos
 # 3. Bootstrap: validates sidecar config and creates first-launch directories
 cargo run -p masterd-bootstrap
 
-# 4. Build the full installer bundle
-#    Runs model install/verification first, then sidecars, frontend, and Tauri.
-./scripts/build-installer-bundles.sh
+# 4. Run the desktop app
+#    This starts the Tauri app, launches Meilisearch/Valkey/FalkorDB + the
+#    ColBERT/Jina/Qwen3 embedding services, and preloads both LFM2.5 models.
+pnpm dev
 
-# — OR — run the desktop app directly in dev mode:
+# — OR — run the desktop app directly from the Tauri crate:
 cd apps/masterd-desktop-tauri
 cargo tauri dev
 ```
@@ -126,7 +131,7 @@ Pipeline stages (configurable in `config/pipeline.toml`):
 The embedding services run as separate HTTP processes. The main installer sets them up by default, including Jina model prefetch. All installs are routed through the AMD ROCm PyTorch index — no CUDA wheels are permitted.
 
 > [!NOTE]
-> Whenever the Tauri desktop UI is launched, it automatically starts the embedding services (ColBERT, Jina, Qwen3) as supervised processes and preloads the embedded LFM2.5 thinking and instruct models.
+> Whenever the desktop app is launched, it automatically starts the embedding services (ColBERT, Jina, Qwen3) as supervised processes and preloads the embedded LFM2.5 thinking and instruct models. This happens from both `pnpm dev` at the repo root and `cargo tauri dev` inside `apps/masterd-desktop-tauri`.
 > 
 > You can also start the services manually for CLI tools or development:
 
@@ -251,30 +256,17 @@ This repo enforces that model via `masterd-sidecars::validate_foundation()`.
 - Rust prompt registry loader:
   - `crates/masterd-prompt-core`
 
-## Quick start
+## Run-only shortcuts
 
 ```bash
 cd /home/local/ai/projects/MASTERd
 cargo run -p masterd-bootstrap
 ```
 
-## Ingest pipeline run
-
 ```bash
 cd /home/local/ai/projects/MASTERd
 cargo run -p masterd-ingest -- --root /path/to/files
 ```
-
-Pipeline order implemented (deterministic runtime; configurable via `config/pipeline.toml` `[runtime].stage_order`):
-1. Rapid hash
-2. Valkey hot-cache write (with offline fallback)
-3. Rigorous dedup gate
-4. Canonical SQLite write (`data/masterd.db`)
-5. Lance snapshot queue (`data/lancedb_snapshots.jsonl`)
-6. ColBERT CPU rerank queue (`data/colbert_rerank_queue.jsonl`)
-7. Meilisearch lexical queue (`data/meilisearch_queue.jsonl`)
-8. Optional Jina omni multimodal queue (`data/jina_omni_queue.jsonl`)
-9. Falkor mirror queue (`data/falkor_queue.jsonl`)
 
 ## Embedded 3-model local inference setup (ported)
 

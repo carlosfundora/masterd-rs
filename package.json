@@ -1,0 +1,9 @@
+{
+  "name": "masterd",
+  "private": true,
+  "packageManager": "pnpm@11.1.2",
+  "scripts": {
+    "dev": "cd apps/masterd-desktop-tauri && cargo tauri dev",
+    "build": "cd apps/masterd-desktop-tauri && cargo tauri build"
+  }
+}

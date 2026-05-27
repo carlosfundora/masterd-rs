@@ -190,6 +190,61 @@ masterd_install_system_dep() {
   fi
 }
 
+masterd_install_system_pkg() {
+  local pkg_deb="$1"
+  local pkg_rpm="$2"
+  local pkg_arch="$3"
+
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -y || true
+    sudo apt-get install -y "${pkg_deb}"
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y "${pkg_rpm}"
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y "${pkg_rpm}"
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm "${pkg_arch}"
+  else
+    masterd_die "Cannot install '${pkg_deb}'. No supported package manager found (apt-get, dnf, yum, pacman)."
+  fi
+}
+
+masterd_install_pkgconfig_module() {
+  local module="$1"
+  local pkg_deb="$2"
+  local pkg_rpm="$3"
+  local pkg_arch="$4"
+
+  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists "${module}"; then
+    return 0
+  fi
+
+  masterd_install_system_pkg "${pkg_deb}" "${pkg_rpm}" "${pkg_arch}"
+}
+
+masterd_ensure_linux_desktop_deps() {
+  [[ "$(uname -s)" == "Linux" ]] || return 0
+
+  masterd_install_system_dep pkg-config pkg-config pkgconf-pkg-config pkgconf
+  masterd_install_system_dep patchelf patchelf patchelf patchelf
+
+  masterd_install_pkgconfig_module "webkit2gtk-4.1" \
+    libwebkit2gtk-4.1-dev webkit2gtk4.1-devel webkit2gtk-4.1
+  masterd_install_pkgconfig_module "javascriptcoregtk-4.1" \
+    libjavascriptcoregtk-4.1-dev javascriptcoregtk4.1-devel javascriptcoregtk-4.1
+  masterd_install_pkgconfig_module "libsoup-3.0" \
+    libsoup-3.0-dev libsoup3-devel libsoup3
+  masterd_install_pkgconfig_module "gtk4" \
+    libgtk-4-dev gtk4-devel gtk4
+  masterd_install_pkgconfig_module "gtk+-3.0" \
+    libgtk-3-dev gtk3-devel gtk3
+  masterd_install_pkgconfig_module "ayatana-appindicator3-0.1" \
+    libayatana-appindicator3-dev ayatana-appindicator3-devel libayatana-appindicator
+  masterd_install_pkgconfig_module "librsvg-2.0" \
+    librsvg2-dev librsvg2-devel librsvg
+  masterd_install_system_pkg libssl-dev openssl-devel openssl
+}
+
 masterd_ensure_source_build_tools() {
   masterd_init_bootstrap "$1"
 
@@ -203,6 +258,8 @@ masterd_ensure_source_build_tools() {
   if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
     masterd_install_system_dep gcc build-essential gcc gcc
   fi
+
+  masterd_ensure_linux_desktop_deps
 
   if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
     masterd_log "Rust toolchain not found; installing stable Rust via rustup"
