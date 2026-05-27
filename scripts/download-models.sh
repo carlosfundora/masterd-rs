@@ -20,6 +20,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+source "${ROOT_DIR}/scripts/lib/install-bootstrap.sh"
+masterd_ensure_installer_venv "${ROOT_DIR}"
+
+export HF_HOME="${HF_HOME:-${ROOT_DIR}/models/.hf_cache}"
+
 RED=$'\033[38;5;196m'
 GREEN=$'\033[38;5;46m'
 CYAN=$'\033[38;5;51m'
@@ -123,9 +128,9 @@ hf_download() {
   local tmp="${dest}.tmp"
   /usr/bin/rm -f "${tmp}"
 
-  if command -v python3 >/dev/null 2>&1 && python3 -c "import huggingface_hub" 2>/dev/null; then
+  if [[ -n "${MASTERD_INSTALLER_PYTHON:-}" ]]; then
     # Prefer huggingface-hub for resumable downloads with progress
-    HF_REPO="${repo}" HF_FILE="${filename}" HF_DEST="${dest}" HF_TOKEN="${HF_TOKEN}" python3 - <<'PY'
+    HF_REPO="${repo}" HF_FILE="${filename}" HF_DEST="${dest}" HF_TOKEN="${HF_TOKEN}" "${MASTERD_INSTALLER_PYTHON}" - <<'PY'
 import os
 import shutil
 import sys

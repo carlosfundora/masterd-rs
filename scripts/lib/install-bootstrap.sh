@@ -112,6 +112,48 @@ masterd_resolve_python() {
   [[ -x "${MASTERD_PYTHON_BIN}" ]] || masterd_die "uv could not provide Python 3.12"
 }
 
+masterd_ensure_installer_venv() {
+  local root_dir="$1"
+  local venv_dir="${root_dir}/.venv-installer"
+
+  masterd_resolve_python "${root_dir}"
+  
+  # Try to find/ensure uv, but do not fail if unavailable
+  MASTERD_UV_BIN=""
+  if command -v uv >/dev/null 2>&1; then
+    MASTERD_UV_BIN="$(command -v uv)"
+  elif [[ -d "${HOME}/.local/bin" && -x "${HOME}/.local/bin/uv" ]]; then
+    MASTERD_UV_BIN="${HOME}/.local/bin/uv"
+  fi
+
+  if [[ ! -d "${venv_dir}" ]]; then
+    masterd_log "Creating installer venv at ${venv_dir}..."
+    if [[ -n "${MASTERD_UV_BIN}" ]]; then
+      "${MASTERD_UV_BIN}" venv --seed --relocatable --python "${MASTERD_PYTHON_BIN}" "${venv_dir}"
+    else
+      "${MASTERD_PYTHON_BIN}" -m venv "${venv_dir}"
+    fi
+  fi
+
+  local venv_python="${venv_dir}/bin/python"
+
+  # Ensure huggingface-hub is installed in the installer venv
+  if ! "${venv_python}" -c "import huggingface_hub" >/dev/null 2>&1; then
+    masterd_log "Installing huggingface-hub into installer venv..."
+    if [[ -n "${MASTERD_UV_BIN}" ]]; then
+      masterd_without_python_index_env "${MASTERD_UV_BIN}" pip install \
+        --python "${venv_python}" \
+        huggingface-hub
+    else
+      "${venv_python}" -m ensurepip --upgrade >/dev/null 2>&1 || true
+      masterd_without_python_index_env "${venv_python}" -m pip install --upgrade pip setuptools wheel
+      masterd_without_python_index_env "${venv_python}" -m pip install huggingface-hub
+    fi
+  fi
+
+  MASTERD_INSTALLER_PYTHON="${venv_python}"
+}
+
 masterd_install_system_dep() {
   local cmd="$1"
   local pkg_deb="$2"

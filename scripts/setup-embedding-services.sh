@@ -28,7 +28,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICES_DIR="${ROOT_DIR}/services"
 
+RED=$'\033[38;5;196m'
+GREEN=$'\033[38;5;46m'
+CYAN=$'\033[38;5;51m'
+YELLOW=$'\033[38;5;226m'
+RESET=$'\033[0m'
+
+info()    { printf "%b[setup-embed]%b %s\n" "${CYAN}"  "${RESET}" "$*"; }
+success() { printf "%b[setup-embed]%b %s\n" "${GREEN}" "${RESET}" "$*"; }
+warn()    { printf "%b[setup-embed]%b %s\n" "${YELLOW}" "${RESET}" "$*"; }
+die()     { printf "%b[setup-embed] ERROR:%b %s\n" "${RED}" "${RESET}" "$*" >&2; exit 1; }
+
 source "${ROOT_DIR}/scripts/lib/install-bootstrap.sh"
+export HF_HOME="${HF_HOME:-${ROOT_DIR}/models/.hf_cache}"
 
 # Detect if AMD ROCm/GPU is available on the system.
 HAS_ROCM=0
@@ -61,17 +73,6 @@ PYTHON_BIN="${PYTHON_BIN:-python3.12}"
 TARGET_SERVICE="${TARGET_SERVICE:-all}"
 PREFETCH_MODELS="${PREFETCH_MODELS:-1}"
 
-RED=$'\033[38;5;196m'
-GREEN=$'\033[38;5;46m'
-CYAN=$'\033[38;5;51m'
-YELLOW=$'\033[38;5;226m'
-RESET=$'\033[0m'
-
-info()    { printf "%b[setup-embed]%b %s\n" "${CYAN}"  "${RESET}" "$*"; }
-success() { printf "%b[setup-embed]%b %s\n" "${GREEN}" "${RESET}" "$*"; }
-warn()    { printf "%b[setup-embed]%b %s\n" "${YELLOW}" "${RESET}" "$*"; }
-die()     { printf "%b[setup-embed] ERROR:%b %s\n" "${RED}" "${RESET}" "$*" >&2; exit 1; }
-
 ensure_uv() {
   masterd_ensure_uv "${ROOT_DIR}"
   UV_BIN="${MASTERD_UV_BIN}"
@@ -80,7 +81,7 @@ ensure_uv() {
 create_venv() {
   local venv_dir="$1"
   if [[ -n "${UV_BIN}" ]]; then
-    "${UV_BIN}" venv --python "${PYTHON_BIN}" "${venv_dir}"
+    "${UV_BIN}" venv --seed --relocatable --python "${PYTHON_BIN}" "${venv_dir}"
   else
     "${PYTHON_BIN}" -m venv "${venv_dir}"
   fi
@@ -89,9 +90,63 @@ create_venv() {
 install_requirements() {
   local venv_python="$1"
   local reqs_file="$2"
+  local venv_dir
+  venv_dir="$(dirname "$(dirname "${venv_python}")")"
 
+  # Detect if we should use the local ROCm venv bridge (to speed up testing/validation on this host)
+  local canonical_venv="/home/local/Projects/venvs/.venv-pytorch-rocm-72"
+  if [[ -d "${canonical_venv}" ]]; then
+    info "  Local canonical ROCm venv detected. Activating bridge link..."
+    local sp_dir="${venv_dir}/lib/python3.12/site-packages"
+    mkdir -p "${sp_dir}"
+    echo "${canonical_venv}/lib/python3.12/site-packages" > "${sp_dir}/bridge.pth"
+    
+    # Filter torch, triton, colbert-ai, and sentence-transformers to temp_reqs
+    local temp_reqs
+    temp_reqs="$(mktemp)"
+    grep -v -E '^(torch|triton|colbert-ai|sentence-transformers)($|[=>~])' "${reqs_file}" > "${temp_reqs}"
+    
+    local torch_deps=()
+    if grep -q -E '^colbert-ai($|[=>~])' "${reqs_file}"; then
+      torch_deps+=("colbert-ai")
+    fi
+    if grep -q -E '^sentence-transformers($|[=>~])' "${reqs_file}"; then
+      torch_deps+=("sentence-transformers")
+    fi
+
+    info "  Installing non-bridged, non-torch requirements..."
+    if [[ -n "${UV_BIN}" ]]; then
+      masterd_without_python_index_env "${UV_BIN}" pip install \
+        --no-config \
+        --python "${venv_python}" \
+        -r "${temp_reqs}"
+      
+      if [[ "${#torch_deps[@]}" -gt 0 ]]; then
+        info "  Installing torch-dependent packages (${torch_deps[*]}) with --no-deps..."
+        masterd_without_python_index_env "${UV_BIN}" pip install \
+          --no-config \
+          --python "${venv_python}" \
+          --no-deps \
+          "${torch_deps[@]}"
+      fi
+    else
+      "${venv_python}" -m ensurepip --upgrade >/dev/null 2>&1 || true
+      masterd_without_python_index_env "${venv_python}" -m pip install --upgrade pip setuptools wheel
+      masterd_without_python_index_env "${venv_python}" -m pip install -r "${temp_reqs}"
+      
+      if [[ "${#torch_deps[@]}" -gt 0 ]]; then
+        info "  Installing torch-dependent packages (${torch_deps[*]}) with --no-deps..."
+        masterd_without_python_index_env "${venv_python}" -m pip install --no-deps "${torch_deps[@]}"
+      fi
+    fi
+    rm -f "${temp_reqs}"
+    return 0
+  fi
+
+  # Otherwise: Public user clean install path
   if [[ -n "${UV_BIN}" ]]; then
     masterd_without_python_index_env "${UV_BIN}" pip install \
+      --no-config \
       --python "${venv_python}" \
       --constraint "${ROCM_CONSTRAINTS}" \
       --extra-index-url "${ROCM_TORCH_INDEX}" \
@@ -254,7 +309,7 @@ REQS
 
 Provides:
   POST /embed   — returns token-level embeddings for a batch of texts
-  POST /rerank  — ColBERT MaxSim reranking for (query, [docs]) pairs
+  POST /rerank or /v1/rerank  — ColBERT MaxSim reranking for (query, [docs]) pairs
   GET  /health  — health check
 """
 from __future__ import annotations
@@ -263,19 +318,42 @@ import torch
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+# Abstract path resolution through an installation resolution layer
+def resolve_install_path(rel_path: str) -> str:
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.abspath(os.path.join(root_dir, rel_path))
+
+# Set local Hugging Face cache root to keep the installation self-contained
+if "HF_HOME" not in os.environ:
+    os.environ["HF_HOME"] = resolve_install_path("models/.hf_cache")
+
 app = FastAPI(title="MASTERd ColBERT Service")
 _model = None
 _tokenizer = None
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-MODEL_NAME = os.getenv("COLBERT_MODEL", "colbert-ir/colbertv2.0")
+
+local_model = resolve_install_path("models/lfm2-colbert-350m")
+if os.path.isdir(local_model) and os.path.exists(os.path.join(local_model, "tokenizer.json")):
+    DEFAULT_MODEL = local_model
+else:
+    DEFAULT_MODEL = "colbert-ir/colbertv2.0"
+
+MODEL_NAME = os.getenv("COLBERT_MODEL", DEFAULT_MODEL)
 
 
 @app.on_event("startup")
 async def load_model() -> None:
     global _model, _tokenizer
     from transformers import AutoTokenizer, AutoModel
-    _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    
+    local_tokenizer_path = resolve_install_path("models/lfm2-colbert-350m")
+    if os.path.isdir(local_tokenizer_path) and os.path.exists(os.path.join(local_tokenizer_path, "tokenizer.json")):
+        tokenizer_name = local_tokenizer_path
+    else:
+        tokenizer_name = MODEL_NAME
+
+    _tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     _model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE).eval()
 
 
@@ -312,6 +390,7 @@ async def embed(req: EmbedRequest) -> dict:
 
 
 @app.post("/rerank")
+@app.post("/v1/rerank")
 async def rerank(req: RerankRequest) -> dict:
     assert _model is not None, "Model not loaded"
     enc_q = _tokenizer(
@@ -326,8 +405,18 @@ async def rerank(req: RerankRequest) -> dict:
     q_vecs = torch.nn.functional.normalize(q_vecs, dim=-1)
     d_vecs = torch.nn.functional.normalize(d_vecs, dim=-1)
     scores = (q_vecs.unsqueeze(0) @ d_vecs.permute(0, 2, 1)).max(dim=-1).values.sum(dim=-1)
+    
     ranked = torch.argsort(scores, descending=True)[: req.top_k].cpu().tolist()
-    return {"ranked_indices": ranked, "scores": scores[ranked].cpu().tolist()}
+    scores_list = scores[ranked].cpu().tolist()
+    
+    # Expose both custom array and OpenAI-compatible results list structure for Rust client compatibility
+    results = [{"index": idx, "relevance_score": s, "score": s} for idx, s in zip(ranked, scores_list)]
+    
+    return {
+        "ranked_indices": ranked,
+        "scores": scores_list,
+        "results": results
+    }
 
 
 if __name__ == "__main__":
@@ -365,6 +454,15 @@ import os
 import torch
 from fastapi import FastAPI
 from pydantic import BaseModel
+
+# Abstract path resolution through an installation resolution layer
+def resolve_install_path(rel_path: str) -> str:
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.abspath(os.path.join(root_dir, rel_path))
+
+# Set local Hugging Face cache root to keep the installation self-contained
+if "HF_HOME" not in os.environ:
+    os.environ["HF_HOME"] = resolve_install_path("models/.hf_cache")
 
 app = FastAPI(title="MASTERd Jina Embedding Service")
 _model = None
@@ -464,6 +562,15 @@ import torch
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+# Abstract path resolution through an installation resolution layer
+def resolve_install_path(rel_path: str) -> str:
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.abspath(os.path.join(root_dir, rel_path))
+
+# Set local Hugging Face cache root to keep the installation self-contained
+if "HF_HOME" not in os.environ:
+    os.environ["HF_HOME"] = resolve_install_path("models/.hf_cache")
+
 app = FastAPI(title="MASTERd Qwen3 Embedding Service")
 _model = None
 _tokenizer = None
@@ -531,6 +638,7 @@ case "${TARGET_SERVICE}" in
   colbert|all)
     write_colbert_reqs
     setup_venv "colbert-service"
+    prefetch_hf_model "colbert-service" "COLBERT_MODEL" "LiquidAI/LFM2-ColBERT-350M" "0"
     ;;&
   jina|all)
     write_jina_reqs
@@ -540,6 +648,7 @@ case "${TARGET_SERVICE}" in
   qwen3|all)
     write_qwen3_reqs
     setup_venv "qwen3-service"
+    prefetch_hf_model "qwen3-service" "QWEN3_MODEL" "Qwen/Qwen3-Embedding" "0"
     ;;&
 esac
 
