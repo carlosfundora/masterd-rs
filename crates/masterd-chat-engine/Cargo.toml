@@ -21,4 +21,4 @@ tracing      = { workspace = true }
 candle-core         = { path = "../../vendor/candle/candle-core",         package = "candle-core" }
 candle-nn           = { path = "../../vendor/candle/candle-nn",           package = "candle-nn" }
 candle-transformers = { path = "../../vendor/candle/candle-transformers", package = "candle-transformers" }
-tokenizers          = { path = "../../vendor/tokenizers", default-features = false, features = ["onig"] }
+tokenizers          = { path = "../../vendor/tokenizers/tokenizers", default-features = false, features = ["onig"] }

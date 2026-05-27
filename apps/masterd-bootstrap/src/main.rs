@@ -29,6 +29,10 @@ struct Args {
 
     #[arg(long, default_value_t = true)]
     allow_tune_downloads: bool,
+
+    /// Execute the full recursive installation flow (packages, node, vendors, models, sidecars, tauri).
+    #[arg(long, default_value_t = false)]
+    install: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,10 +76,84 @@ struct EmbeddingConfig {
     multimodal_optional: bool,
 }
 
+use anyhow::Context;
+
+fn run_command(name: &str, program: &str, args: &[&str]) -> Result<()> {
+    println!("\n=== [bootstrap-rust] Phase: {} ===", name);
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .spawn()
+        .with_context(|| format!("Failed to spawn command for {}", name))?;
+    let status = child.wait().with_context(|| format!("Failed to wait for {}", name))?;
+    if !status.success() {
+        anyhow::bail!("Phase '{}' failed with exit code: {:?}", name, status.code());
+    }
+    println!("=== [bootstrap-rust] Phase: {} [OK] ===\n", name);
+    Ok(())
+}
+
+fn run_installation_flow() -> Result<()> {
+    println!("Initializing MASTERd recursive installer...");
+    
+    // Phase 1: System packages & Rust toolchain validation (via install-bootstrap.sh)
+    run_command(
+        "System Dependencies & Source Build Tools",
+        "bash",
+        &["-c", "source scripts/lib/install-bootstrap.sh && masterd_ensure_source_build_tools ."],
+    )?;
+
+    // Phase 2: Node.js & pnpm setup
+    run_command(
+        "Node.js & pnpm Package Manager",
+        "bash",
+        &["-c", "source scripts/lib/install-bootstrap.sh && masterd_ensure_pnpm ."],
+    )?;
+
+    // Phase 3: Model Downloads
+    run_command(
+        "Download GGUF Models & Tokenizers",
+        "./scripts/download-models.sh",
+        &[],
+    )?;
+
+    // Phase 4: Embedding Services Python Environments & Prefetching
+    run_command(
+        "Embedding Services Setup (ROCm/CPU)",
+        "./scripts/setup-embedding-services.sh",
+        &["all"],
+    )?;
+
+    // Phase 5: Sidecar Binaries (Valkey build, Meilisearch & FalkorDB download)
+    run_command(
+        "Sidecar Binaries & Tauri App Build",
+        "./scripts/build-installer-bundles.sh",
+        &[],
+    )?;
+
+    // Phase 6: Verify full workspace compilation
+    run_command(
+        "Workspace Cargo Compilation Verification",
+        "cargo",
+        &["build"],
+    )?;
+
+    println!("==================================================");
+    println!("MASTERd recursive installation completed successfully!");
+    println!("All dependencies have been compiled, downloaded, and verified.");
+    println!("You can now start the desktop application with:");
+    println!("  cd apps/masterd-desktop-tauri && cargo tauri dev");
+    println!("==================================================");
+    Ok(())
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let args = Args::parse();
+    if args.install {
+        return run_installation_flow();
+    }
+
     let foundation = ProjectFoundation::rust_first();
     let prompts = PromptRegistry::from_masterd_sources();
 

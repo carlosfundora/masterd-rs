@@ -51,15 +51,9 @@ fi
 # ── AMD ROCm/CPU index ────────────────────────────────────────────────────
 # Keep these as local script variables. Passing them directly to pip/uv package
 # installs avoids leaking package-index URLs into uv python/bootstrap commands.
-if [[ "${HAS_ROCM}" == "1" ]]; then
-  info "AMD ROCm/GPU detected. Enforcing ROCm PyTorch index."
-  ROCM_TORCH_INDEX="${ROCM_TORCH_INDEX:-https://download.pytorch.org/whl/nightly/rocm6.3}"
-  ROCM_STABLE_INDEX="${ROCM_STABLE_INDEX:-https://download.pytorch.org/whl/rocm6.2.4}"
-else
-  warn "No AMD ROCm/GPU detected. Setting up CPU-only PyTorch index."
-  ROCM_TORCH_INDEX="https://download.pytorch.org/whl/cpu"
-  ROCM_STABLE_INDEX="https://download.pytorch.org/whl/cpu"
-fi
+info "Enforcing CPU PyTorch index for all environments (CPU inference stack)."
+ROCM_TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+ROCM_STABLE_INDEX="https://download.pytorch.org/whl/cpu"
 
 ROCM_CONSTRAINTS="${ROOT_DIR}/config/rocm-constraints.txt"
 unset UV_EXTRA_INDEX_URL UV_INDEX_URL UV_CONSTRAINT
@@ -340,7 +334,7 @@ app = FastAPI(title="MASTERd ColBERT Service")
 _model = None
 _tokenizer = None
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cpu"
 
 local_model = resolve_install_path("models/lfm2-colbert-350m")
 if os.path.isdir(local_model) and os.path.exists(os.path.join(local_model, "tokenizer.json")):
@@ -477,7 +471,7 @@ app = FastAPI(title="MASTERd Jina Embedding Service")
 _model = None
 _tokenizer = None
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cpu"
 MODEL_NAME = os.getenv("JINA_MODEL", "jinaai/jina-embeddings-v3")
 MAX_LENGTH = int(os.getenv("JINA_MAX_LENGTH", "8192"))
 
@@ -584,7 +578,7 @@ app = FastAPI(title="MASTERd Qwen3 Embedding Service")
 _model = None
 _tokenizer = None
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cpu"
 MODEL_NAME = os.getenv("QWEN3_MODEL", "Qwen/Qwen3-Embedding")
 
 
