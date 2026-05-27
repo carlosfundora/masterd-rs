@@ -302,7 +302,7 @@ fn build_benchmark_corpus(
 
     let doc_candidates = [
         docs_root.join("README.md"),
-        docs_root.join("crates/model2vec-rs/README.md"),
+        docs_root.join("vendor/model2vec-rs/README.md"),
         docs_root.join("models/masterd-identity/masterd_personality_prompt.txt"),
         docs_root.join("crates/masterd-chat-engine/assets/prompts/masterd_personality.txt"),
     ];
@@ -375,16 +375,14 @@ fn build_benchmark_corpus(
     let ingest_config = IngestConfig::default();
     for path in &inputs {
         let outcome = store.ingest_file(path, &ingest_config)?;
-        if let Some(doc) = outcome.document {
-            if seen_ids.insert(doc.id.clone()) {
-                if let Some(text) = doc.extracted_text.clone() {
+        if let Some(doc) = outcome.document
+            && seen_ids.insert(doc.id.clone())
+                && let Some(text) = doc.extracted_text.clone() {
                     unique_docs.push(BenchmarkDoc {
                         path: PathBuf::from(doc.current_path),
                         text,
                     });
                 }
-            }
-        }
     }
 
     let report = CorpusReport {
@@ -438,8 +436,8 @@ fn benchmark_ingest(inputs: &[PathBuf]) -> Result<IngestBenchmark> {
         if outcome.run.status == "duplicate" {
             duplicate_ops += 1;
         }
-        if let Some(doc) = outcome.document {
-            if outcome.run.status != "duplicate" {
+        if let Some(doc) = outcome.document
+            && outcome.run.status != "duplicate" {
                 unique_docs += 1;
                 total_chunks += outcome.run.indexed_chunk_count;
                 total_chars += doc
@@ -448,7 +446,6 @@ fn benchmark_ingest(inputs: &[PathBuf]) -> Result<IngestBenchmark> {
                     .map(|text| text.len())
                     .unwrap_or(0);
             }
-        }
     }
     let elapsed = start.elapsed();
     drop(store);

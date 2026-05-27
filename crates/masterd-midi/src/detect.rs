@@ -97,19 +97,17 @@ pub fn find_system_player() -> Option<SystemPlayer> {
     }
 
     // aplaymidi — ALSA native, needs a software synth port open
-    if let Ok(bin) = which::which("aplaymidi") {
-        if detect_alsa_port().is_some() {
+    if let Ok(bin) = which::which("aplaymidi")
+        && detect_alsa_port().is_some() {
             return Some(SystemPlayer::Aplaymidi { bin });
         }
         // Skip aplaymidi if no MIDI port found — it would just hang.
-    }
 
     // pmidi — alternative ALSA player
-    if let Ok(bin) = which::which("pmidi") {
-        if detect_alsa_port().is_some() {
+    if let Ok(bin) = which::which("pmidi")
+        && detect_alsa_port().is_some() {
             return Some(SystemPlayer::Pmidi { bin });
         }
-    }
 
     // wildmidi — GUS-patch synth
     if let Ok(bin) = which::which("wildmidi") {
@@ -152,11 +150,10 @@ fn detect_alsa_port() -> Option<String> {
     for line in text.lines().skip(1) {
         // Lines look like: " 128:0    Timidity++"
         let cols: Vec<&str> = line.split_whitespace().collect();
-        if let Some(port) = cols.first() {
-            if port.contains(':') {
+        if let Some(port) = cols.first()
+            && port.contains(':') {
                 return Some(port.to_string());
             }
-        }
     }
     None
 }

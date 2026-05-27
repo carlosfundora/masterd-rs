@@ -46,13 +46,12 @@ impl DocumentDeduper {
         };
 
         let mut host = parsed.host_str().unwrap_or("").to_lowercase();
-        if let Some(port) = parsed.port() {
-            if !((port == 80 && parsed.scheme() == "http")
+        if let Some(port) = parsed.port()
+            && !((port == 80 && parsed.scheme() == "http")
                 || (port == 443 && parsed.scheme() == "https"))
             {
                 host = format!("{host}:{port}");
             }
-        }
         if host.starts_with("www.") {
             host = host[4..].to_string();
         }
@@ -144,14 +143,13 @@ impl DocumentDeduper {
 
         // 2. Domain + title duplicate
         let domain = Self::extract_domain(url);
-        if !domain.is_empty() && !normalized_title.is_empty() {
-            if !self
+        if !domain.is_empty() && !normalized_title.is_empty()
+            && !self
                 .seen_domain_titles
                 .insert((domain, normalized_title.clone()))
             {
                 return true;
             }
-        }
 
         // 3. Long title match (same headline, different domain) — only for titles ≥5 words
         let word_count = normalized_title.split_whitespace().count();

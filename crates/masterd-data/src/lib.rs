@@ -114,17 +114,14 @@ pub struct RetrievalCandidate {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SearchMode {
     Lexical,
     Semantic,
+    #[default]
     Hybrid,
 }
 
-impl Default for SearchMode {
-    fn default() -> Self {
-        Self::Hybrid
-    }
-}
 
 impl SearchMode {
     pub fn from_str_lossy(value: &str) -> Self {
@@ -797,14 +794,12 @@ impl DataStore {
         let start = std::time::Instant::now();
         let mut merged = rrf_merge_candidates(candidates, top_k.saturating_mul(2).max(top_k).max(1));
         let mut reranked = false;
-        if let Some(reranker) = &self.reranker {
-            if let Ok(results) = reranker.rerank(query, &merged, top_k.max(1)) {
-                if !results.is_empty() {
+        if let Some(reranker) = &self.reranker
+            && let Ok(results) = reranker.rerank(query, &merged, top_k.max(1))
+                && !results.is_empty() {
                     merged = results;
                     reranked = true;
                 }
-            }
-        }
         stages.push(RetrievalStageTrace {
             stage: "colbert_rerank".to_string(),
             count: merged.len(),
@@ -1019,13 +1014,11 @@ impl DataStore {
     }
 
     fn lexical_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
-        if let Some(meili) = &self.meili {
-            if let Ok(results) = meili.search_chunks(query, limit) {
-                if !results.is_empty() {
+        if let Some(meili) = &self.meili
+            && let Ok(results) = meili.search_chunks(query, limit)
+                && !results.is_empty() {
                     return Ok(results);
                 }
-            }
-        }
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         if query.trim().is_empty() {
             let mut stmt = conn.prepare(
@@ -1034,7 +1027,7 @@ impl DataStore {
                  ORDER BY d.updated_at DESC LIMIT ?1",
             )?;
             let rows = stmt.query_map(params![limit as i64], |row| {
-                Ok(candidate_from_row(row, "lexical")?)
+                candidate_from_row(row, "lexical")
             })?;
             return rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into);
         }
@@ -1050,7 +1043,7 @@ impl DataStore {
              LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
-            Ok(candidate_from_row(row, "lexical")?)
+            candidate_from_row(row, "lexical")
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -1058,11 +1051,10 @@ impl DataStore {
     fn semantic_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
         let jina_query_vector = self.embedding.as_ref().and_then(|client| client.embed_one(query).ok());
         let mut out = Vec::new();
-        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref()) {
-            if let Ok(mut results) = lancedb.search(query_vector, limit) {
+        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref())
+            && let Ok(mut results) = lancedb.search(query_vector, limit) {
                 out.append(&mut results);
             }
-        }
         if let Some(mut jina) = self.semantic_search_table("embeddings", "semantic_jina", query, limit, jina_query_vector.as_deref())? {
             out.append(&mut jina);
         }
@@ -1243,8 +1235,8 @@ impl DataStore {
                 metadata: jina_profile.metadata_context,
             });
 
-            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref() {
-                if let Some(embedding) = model2vec_embeddings.get(index) {
+            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref()
+                && let Some(embedding) = model2vec_embeddings.get(index) {
                     let vector = embedding.clone();
                     let vector_json = serde_json::to_string(&vector)?;
                     let vector_hash = sha256_hex(vector_json.as_bytes());
@@ -1269,7 +1261,6 @@ impl DataStore {
                         ],
                     )?;
                 }
-            }
         }
         tx.commit()?;
         if let Some(lancedb) = &self.lancedb {
@@ -1342,7 +1333,7 @@ impl DataStore {
                 ",
             )?;
             let rows = stmt.query_map(params![seed, limit as i64], |row| {
-                Ok(candidate_from_row(row, "graph_expansion")?)
+                candidate_from_row(row, "graph_expansion")
             })?;
             out.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
         }
@@ -1610,13 +1601,11 @@ pub fn chunk_text(
 }
 
 fn document_sections(text: &str, extension: &str) -> Vec<(String, String)> {
-    if extension == "rs" {
-        if let Some(sections) = rust_structured_sections(text) {
-            if !sections.is_empty() {
+    if extension == "rs"
+        && let Some(sections) = rust_structured_sections(text)
+            && !sections.is_empty() {
                 return sections.into_iter().map(|section| ("ast_section".to_string(), section)).collect();
             }
-        }
-    }
     semantic_units(text)
         .into_iter()
         .map(|section| ("semantic_section".to_string(), section))
@@ -1634,14 +1623,13 @@ fn rust_structured_sections(text: &str) -> Option<Vec<String>> {
         if matches!(
             child.kind(),
             "function_item" | "struct_item" | "enum_item" | "trait_item" | "impl_item" | "mod_item" | "type_item" | "const_item" | "static_item" | "use_declaration"
-        ) {
-            if let Ok(snippet) = child.utf8_text(text.as_bytes()) {
+        )
+            && let Ok(snippet) = child.utf8_text(text.as_bytes()) {
                 let snippet = snippet.trim();
                 if !snippet.is_empty() {
                     sections.push(snippet.to_string());
                 }
             }
-        }
     }
     Some(sections)
 }

@@ -17,7 +17,7 @@ members = [
     "crates/masterd-runtime-tune",
     "crates/masterd-sidecars",
     "crates/masterd-ui-contract",
-    "crates/model2vec-rs",
+    "vendor/model2vec-rs",
     "apps/masterd-bootstrap",
     "apps/masterd-engine-check",
     "apps/masterd-ingest",

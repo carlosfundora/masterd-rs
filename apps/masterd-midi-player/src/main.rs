@@ -145,8 +145,8 @@ fn events_to_segments(events: &[MidiEvent], ticks_per_beat: f32) -> Vec<NoteSegm
                 active.insert(key, (now_sec, vel));
             }
             MidiEventKind::NoteOff { key } => {
-                if let Some((start_sec, vel)) = active.remove(&key) {
-                    if now_sec > start_sec {
+                if let Some((start_sec, vel)) = active.remove(&key)
+                    && now_sec > start_sec {
                         out.push(NoteSegment {
                             start_sec,
                             end_sec: now_sec,
@@ -154,7 +154,6 @@ fn events_to_segments(events: &[MidiEvent], ticks_per_beat: f32) -> Vec<NoteSegm
                             amp: (vel as f32 / 127.0) * 0.20,
                         });
                     }
-                }
             }
         }
     }

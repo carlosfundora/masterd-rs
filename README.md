@@ -276,7 +276,7 @@ Copied from your atom-rs/gfxatom runtime pattern:
 
 - ColBERT wrapper: `http://127.0.0.1:11450` (`colbert-lfm2-305m`)
 - Jina embeddings: `http://127.0.0.1:11447` (`jina-code-embed`)
-- model2vec-rs fallback: vendored local crate in `crates/model2vec-rs`
+- model2vec-rs fallback: vendored local crate in `vendor/model2vec-rs`
 
 Config file: `config/embedding_engine.toml`  
 Env overrides supported: `MEMORYBANK_COLBERT_WRAPPER_URL`, `MEMORYBANK_JINA_URL`, `MEMORYBANK_EMBED_CONCURRENCY`.

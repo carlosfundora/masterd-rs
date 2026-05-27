@@ -181,11 +181,10 @@ pub fn ensure_startup_profile_embedded(
 ) -> Result<ProfileLock> {
     let capability = probe_runtime()?;
     let profiles = load_profiles_embedded()?;
-    if let Some(lock) = load_lock(lock_path)? {
-        if profile_compatible(&lock.selected_profile, &capability, &profiles) {
+    if let Some(lock) = load_lock(lock_path)?
+        && profile_compatible(&lock.selected_profile, &capability, &profiles) {
             return Ok(lock);
         }
-    }
     let tuned = autotune(policy, &capability, &profiles)?;
     let lock = write_lock(lock_path, &tuned, &capability)?;
     Ok(lock)
@@ -200,11 +199,10 @@ pub fn ensure_startup_profile(
 ) -> Result<ProfileLock> {
     let capability = probe_runtime()?;
     let profiles = load_profiles(profiles_dir)?;
-    if let Some(lock) = load_lock(lock_path)? {
-        if profile_compatible(&lock.selected_profile, &capability, &profiles) {
+    if let Some(lock) = load_lock(lock_path)?
+        && profile_compatible(&lock.selected_profile, &capability, &profiles) {
             return Ok(lock);
         }
-    }
     let tuned = autotune(policy, &capability, &profiles)?;
     let lock = write_lock(lock_path, &tuned, &capability)?;
     Ok(lock)

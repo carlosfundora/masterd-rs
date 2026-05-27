@@ -1,0 +1,25 @@
+{
+  "run_id": "1",
+  "mode": "migration",
+  "moves": [
+    {
+      "from": "crates/model2vec-rs",
+      "to": "vendor/model2vec-rs",
+      "reason": "Enforce canonical homes: vendor/ is for third-party vendored code, crates/ is for first-party foundation capabilities.",
+      "concern": "dependencies",
+      "owner": "vendor",
+      "references_repaired": [
+        "Cargo.toml",
+        "services/model2vec-service/Cargo.toml",
+        "apps/masterd-engine-check/src/main.rs",
+        "README.md"
+      ]
+    }
+  ],
+  "commits": [],
+  "push_results": [],
+  "validation": {
+    "before": "Compiled",
+    "after": "Compiled, Tests Pass, Clippy Run"
+  }
+}

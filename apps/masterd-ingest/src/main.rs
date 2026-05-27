@@ -146,16 +146,13 @@ impl AtomicHashIndexService {
                     let waited = start.elapsed().unwrap_or_default();
                     if waited >= self.lock_timeout {
                         // Attempt to clean up stale lock
-                        if let Ok(metadata) = std::fs::metadata(&self.lock_path) {
-                            if let Ok(modified) = metadata.modified() {
-                                if let Ok(stale_duration) = SystemTime::now().duration_since(modified) {
-                                    if stale_duration > self.lock_timeout {
+                        if let Ok(metadata) = std::fs::metadata(&self.lock_path)
+                            && let Ok(modified) = metadata.modified()
+                                && let Ok(stale_duration) = SystemTime::now().duration_since(modified)
+                                    && stale_duration > self.lock_timeout {
                                         let _ = std::fs::remove_file(&self.lock_path);
                                         continue;
                                     }
-                                }
-                            }
-                        }
                         return Err(anyhow::anyhow!(
                             "timed out waiting for hash-index lock {} after {:?}",
                             self.lock_path.display(),
