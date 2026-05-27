@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use rayon::prelude::*;
+
 /// BM25 Okapi scorer.
 pub struct BM25Okapi {
     corpus_size: usize,
@@ -104,12 +106,22 @@ impl BM25Okapi {
             return vec![];
         }
 
-        let mut scores: Vec<(usize, f32)> = (0..self.corpus_size)
-            .map(|i| {
-                let score = self.score_doc(i, &query_tokens);
-                (i, score as f32)
-            })
-            .collect();
+        let mut scores: Vec<(usize, f32)> = if self.corpus_size >= 64 {
+            (0..self.corpus_size)
+                .into_par_iter()
+                .map(|i| {
+                    let score = self.score_doc(i, &query_tokens);
+                    (i, score as f32)
+                })
+                .collect()
+        } else {
+            (0..self.corpus_size)
+                .map(|i| {
+                    let score = self.score_doc(i, &query_tokens);
+                    (i, score as f32)
+                })
+                .collect()
+        };
 
         scores.sort_by(|a, b| b.1.total_cmp(&a.1));
         scores.truncate(top_k);
