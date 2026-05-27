@@ -247,11 +247,18 @@ install_falkor_from_wheel() {
   local wheel_dir="${ROOT_DIR}/target/falkordb-bin"
   local metadata_json="${wheel_dir}/falkordb-bin-${FALKOR_BIN_VERSION}.json"
   local wheel_file="${wheel_dir}/falkordb-bin-${FALKOR_BIN_VERSION}-${FALKOR_WHEEL_PLATFORM}.whl"
+  local metadata_tmp="${metadata_json}.tmp.$$"
+  local wheel_tmp="${wheel_file}.tmp.$$"
+  local module_tmp="${FALKOR_SO}.tmp.$$"
+  local server_tmp="${FALKOR_SERVER}.tmp.$$"
   local wheel_url
 
   mkdir -p "${wheel_dir}"
-  curl -fsSL "https://pypi.org/pypi/falkordb-bin/${FALKOR_BIN_VERSION}/json" -o "${metadata_json}"
-  wheel_url="$(FALKOR_WHEEL_PLATFORM="${FALKOR_WHEEL_PLATFORM}" python3 - "${metadata_json}" <<'PY'
+  rm -f "${metadata_tmp}" "${wheel_tmp}" "${module_tmp}" "${server_tmp}"
+  masterd_download_atomic "https://pypi.org/pypi/falkordb-bin/${FALKOR_BIN_VERSION}/json" "${metadata_tmp}"
+  "${MASTERD_PYTHON_BIN}" -m json.tool "${metadata_tmp}" >/dev/null
+  mv "${metadata_tmp}" "${metadata_json}"
+  wheel_url="$(FALKOR_WHEEL_PLATFORM="${FALKOR_WHEEL_PLATFORM}" "${MASTERD_PYTHON_BIN}" - "${metadata_json}" <<'PY'
 import json
 import os
 import sys
@@ -276,8 +283,22 @@ PY
 )"
 
   printf "%b║%b  Downloading FalkorDB binary wheel %s for %s...%b\n" "${RED}" "${CYAN}" "${FALKOR_BIN_VERSION}" "${FALKOR_WHEEL_PLATFORM}" "${RESET}"
-  curl -fsSL "${wheel_url}" -o "${wheel_file}"
-  FALKOR_WHEEL="${wheel_file}" FALKOR_SO="${FALKOR_SO}" FALKOR_SERVER="${FALKOR_SERVER}" python3 - <<'PY'
+  masterd_download_atomic "${wheel_url}" "${wheel_tmp}"
+  FALKOR_WHEEL="${wheel_tmp}" "${MASTERD_PYTHON_BIN}" - <<'PY'
+import os
+import zipfile
+
+wheel = os.environ["FALKOR_WHEEL"]
+with zipfile.ZipFile(wheel) as zf:
+    names = zf.namelist()
+    if not any(name.endswith("/falkordb.so") for name in names):
+        raise SystemExit("falkordb.so missing from FalkorDB wheel")
+    if not any(name.endswith("/redis-server") for name in names):
+        raise SystemExit("redis-server missing from FalkorDB wheel")
+PY
+  mv "${wheel_tmp}" "${wheel_file}"
+
+  FALKOR_WHEEL="${wheel_file}" FALKOR_SO="${module_tmp}" FALKOR_SERVER="${server_tmp}" "${MASTERD_PYTHON_BIN}" - <<'PY'
 import os
 import stat
 import zipfile
@@ -297,6 +318,8 @@ os.chmod(module_dest, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 mode = os.stat(server_dest).st_mode
 os.chmod(server_dest, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 PY
+  mv "${module_tmp}" "${FALKOR_SO}"
+  mv "${server_tmp}" "${FALKOR_SERVER}"
 }
 
 if [[ ! -f "${FALKOR_SO}" || ! -f "${FALKOR_SERVER}" ]]; then

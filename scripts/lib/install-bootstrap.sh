@@ -116,6 +116,7 @@ masterd_ensure_source_build_tools() {
   command -v make >/dev/null 2>&1 || masterd_die "make is required to build bundled Valkey"
   command -v tar >/dev/null 2>&1 || masterd_die "tar is required to unpack installer assets"
   command -v xz >/dev/null 2>&1 || masterd_die "xz is required to unpack Node.js toolchains"
+  command -v file >/dev/null 2>&1 || masterd_die "file is required to validate downloaded native binaries"
 
   if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
     masterd_die "a C compiler is required to build bundled Valkey"
