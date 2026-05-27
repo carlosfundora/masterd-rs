@@ -20,7 +20,7 @@
 #
 # Environment overrides:
 #   ROCM_TORCH_INDEX   — override the primary PyTorch ROCm index URL
-#   PYTHON_BIN         — override the python interpreter (default: python3.12)
+#   PYTHON_BIN         — override the python interpreter (default: python3.12, fallback python3)
 #   HF_TOKEN           — optional Hugging Face token for gated/private models
 #   HF_HOME            — optional local Hugging Face cache root
 set -euo pipefail
@@ -164,7 +164,14 @@ case "${TARGET_SERVICE}" in
 esac
 
 # Validate environment before touching anything.
-command -v "${PYTHON_BIN}" >/dev/null 2>&1 || die "${PYTHON_BIN} not found. Install Python 3.12."
+if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+  if [[ "${PYTHON_BIN}" == "python3.12" ]] && command -v python3 >/dev/null 2>&1; then
+    warn "python3.12 not found; falling back to python3"
+    PYTHON_BIN="python3"
+  else
+    die "${PYTHON_BIN} not found. Install Python 3.12 or set PYTHON_BIN."
+  fi
+fi
 [[ -f "${ROCM_CONSTRAINTS}" ]]    || die "ROCm constraints file missing: ${ROCM_CONSTRAINTS}"
 UV_BIN=""
 ensure_uv
