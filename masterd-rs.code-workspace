@@ -1,0 +1,61 @@
+{
+	"folders": [
+		{
+			"path": "../rust"
+		},
+		{
+			"path": "../DEMERZEL"
+		},
+		{
+			"path": "../harness"
+		},
+		{
+			"path": "../console"
+		},
+		{
+			"path": "../DATALORE"
+		},
+		{
+			"path": "../ENCOM"
+		},
+		{
+			"path": "../REPLICATOR"
+		},
+		{
+			"path": "../../build/wip/ATOM-RS"
+		},
+		{
+			"path": "../SARK-BOT"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"dbcode.connections": [
+			{
+				"connectionId": "XHlOJ1_AB1L2GzSC6RBc0",
+				"name": "SurrealDB",
+				"driver": "surrealdb",
+				"color": "#F632CD",
+				"host": "127.0.0.1",
+				"port": 9102,
+				"driverOptions": {
+					"protocol": "ws://",
+					"namespace": "agens"
+				},
+				"authMethod": "password",
+				"username": "replicator",
+				"password": "",
+				"savePassword": "no",
+				"readOnly": false,
+				"connectionTimeout": 30,
+				"introspection": {
+					"progressive": false
+				},
+				"connectionType": "host"
+			}
+		],
+		"java.compile.nullAnalysis.mode": "automatic"
+	}
+}

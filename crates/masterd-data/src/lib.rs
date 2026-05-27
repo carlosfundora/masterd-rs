@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::Utc;
 use reqwest::blocking::Client;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tree_sitter::Parser;
@@ -236,6 +236,17 @@ pub struct DataStore {
     falkordb: Option<FalkorDbClient>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequiredServiceStatus {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    pub status: String,
+    pub required: bool,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct DataStoreConfig {
     pub db_path: PathBuf,
@@ -286,17 +297,26 @@ impl DataStore {
             embedding: config
                 .embedding_url
                 .filter(|url| !url.trim().is_empty())
-                .map(|url| EmbeddingServiceClient::new(url, config.embedding_model.unwrap_or_else(|| "jina-omni".to_string()))),
+                .map(|url| {
+                    EmbeddingServiceClient::new(
+                        url,
+                        config
+                            .embedding_model
+                            .unwrap_or_else(|| "jina-omni".to_string()),
+                    )
+                }),
             model2vec: config
                 .model2vec_url
                 .filter(|url| !url.trim().is_empty())
-                .map(|url| Model2VecClient::new(
-                    url,
-                    config
-                        .model2vec_model
-                        .filter(|model| !model.trim().is_empty())
-                        .unwrap_or_else(|| "minishlab/potion-base-8M".to_string()),
-                )),
+                .map(|url| {
+                    Model2VecClient::new(
+                        url,
+                        config
+                            .model2vec_model
+                            .filter(|model| !model.trim().is_empty())
+                            .unwrap_or_else(|| "minishlab/potion-base-8M".to_string()),
+                    )
+                }),
             reranker: config
                 .colbert_url
                 .filter(|url| !url.trim().is_empty())
@@ -319,7 +339,10 @@ impl DataStore {
     }
 
     pub fn migrate(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute_batch(
             "
             PRAGMA journal_mode = WAL;
@@ -494,10 +517,86 @@ impl DataStore {
     }
 
     pub fn migration_versions(&self) -> Result<Vec<i64>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare("SELECT version FROM schema_migrations ORDER BY version")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn required_service_statuses(&self) -> Vec<RequiredServiceStatus> {
+        let sqlite_status = match self.sqlite_health_check() {
+            Ok(()) => ready_status("sqlite", "SQLite", "canonical-store"),
+            Err(err) => offline_status("sqlite", "SQLite", "canonical-store", err),
+        };
+        let meilisearch_status = match self.meili.as_ref() {
+            Some(meili) => match meili.health_check() {
+                Ok(()) => ready_status("meilisearch", "Meilisearch", "lexical-index"),
+                Err(err) => offline_status("meilisearch", "Meilisearch", "lexical-index", err),
+            },
+            None => missing_status("meilisearch", "Meilisearch", "lexical-index"),
+        };
+        let valkey_status = match self.valkey.as_ref() {
+            Some(client) => match valkey_health_check(client) {
+                Ok(()) => ready_status("valkey", "Valkey", "hot-cache"),
+                Err(err) => offline_status("valkey", "Valkey", "hot-cache", err),
+            },
+            None => missing_status("valkey", "Valkey", "hot-cache"),
+        };
+        let falkordb_status = match self.falkordb.as_ref() {
+            Some(falkor) => match falkor.health_check() {
+                Ok(()) => ready_status("falkordb", "FalkorDB", "graph-db"),
+                Err(err) => offline_status("falkordb", "FalkorDB", "graph-db", err),
+            },
+            None => missing_status("falkordb", "FalkorDB", "graph-db"),
+        };
+
+        vec![
+            sqlite_status,
+            meilisearch_status,
+            valkey_status,
+            falkordb_status,
+        ]
+    }
+
+    pub fn required_services_ready(&self) -> bool {
+        self.required_service_statuses()
+            .iter()
+            .all(|service| service.status == "ready")
+    }
+
+    fn required_services_error_message(&self) -> Option<String> {
+        let failures = self
+            .required_service_statuses()
+            .into_iter()
+            .filter(|service| service.status != "ready")
+            .map(|service| {
+                let message = service
+                    .message
+                    .unwrap_or_else(|| "required service is unavailable".to_string());
+                format!("{}: {}", service.id, message)
+            })
+            .collect::<Vec<_>>();
+        if failures.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "Required database services unavailable: {}",
+                failures.join("; ")
+            ))
+        }
+    }
+
+    fn sqlite_health_check(&self) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let _: i64 = conn.query_row("SELECT 1", [], |row| row.get(0))?;
+        Ok(())
     }
 
     pub fn ingest_file(&self, path: &Path, config: &IngestConfig) -> Result<IngestOutcome> {
@@ -506,6 +605,24 @@ impl DataStore {
         let mut timings = Vec::new();
         let mut stage_start = std::time::Instant::now();
         let path_string = path.to_string_lossy().to_string();
+
+        if let Some(message) = self.required_services_error_message() {
+            let run = PipelineRun::failed(
+                run_id,
+                None,
+                path_string,
+                "required_services",
+                message,
+                true,
+                timings,
+            );
+            self.upsert_pipeline_run(&run)?;
+            return Ok(IngestOutcome {
+                document: None,
+                chunks: vec![],
+                run,
+            });
+        }
 
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
@@ -520,28 +637,55 @@ impl DataStore {
                     timings,
                 );
                 self.upsert_pipeline_run(&run)?;
-                return Ok(IngestOutcome { document: None, chunks: vec![], run });
+                return Ok(IngestOutcome {
+                    document: None,
+                    chunks: vec![],
+                    run,
+                });
             }
         };
         let hash = sha256_hex(&bytes);
         timings.push(stage_timing("hash", stage_start.elapsed(), "complete"));
 
         if let Some(existing) = self.find_document_by_hash(&hash)? {
-            let mut run = PipelineRun::complete(run_id, Some(existing.id.clone()), path_string, timings);
+            let mut run =
+                PipelineRun::complete(run_id, Some(existing.id.clone()), path_string, timings);
             run.status = "duplicate".to_string();
             self.upsert_pipeline_run(&run)?;
-            self.write_audit(existing.id.as_str(), "duplicate_detected", "system", "Exact hash duplicate detected", false)?;
-            return Ok(IngestOutcome { document: Some(existing), chunks: vec![], run });
+            self.write_audit(
+                existing.id.as_str(),
+                "duplicate_detected",
+                "system",
+                "Exact hash duplicate detected",
+                false,
+            )?;
+            return Ok(IngestOutcome {
+                document: Some(existing),
+                chunks: vec![],
+                run,
+            });
         }
 
         stage_start = std::time::Instant::now();
         let extraction = extract_text(path, &bytes, &config.ocr_language);
-        timings.push(stage_timing("extract_text", stage_start.elapsed(), if extraction.text.is_some() { "complete" } else { "warning" }));
+        timings.push(stage_timing(
+            "extract_text",
+            stage_start.elapsed(),
+            if extraction.text.is_some() {
+                "complete"
+            } else {
+                "warning"
+            },
+        ));
 
         let timestamp = now();
         let id = stable_id("doc", hash.as_bytes());
         let extension = extension(path);
-        let original_name = path.file_name().and_then(|v| v.to_str()).unwrap_or("unknown").to_string();
+        let original_name = path
+            .file_name()
+            .and_then(|v| v.to_str())
+            .unwrap_or("unknown")
+            .to_string();
         let routing = routing_decision_for(path, &hash);
         let mut tags = infer_tags(&extension, extraction.text.as_deref().unwrap_or_default());
         if let Some(decision) = &routing {
@@ -550,13 +694,24 @@ impl DataStore {
             tags.sort();
             tags.dedup();
         }
-        let confidence = if extraction.text.is_some() { 0.82 } else { 0.20 };
-        let processing_status = if extraction.text.is_some() { "complete" } else { "warning" }.to_string();
+        let confidence = if extraction.text.is_some() {
+            0.82
+        } else {
+            0.20
+        };
+        let processing_status = if extraction.text.is_some() {
+            "complete"
+        } else {
+            "warning"
+        }
+        .to_string();
         let doc = DocumentRecord {
             id: id.clone(),
             original_name: original_name.clone(),
             current_name: original_name,
-            suggested_name: routing.as_ref().map(|decision| decision.canonical_name.clone()),
+            suggested_name: routing
+                .as_ref()
+                .map(|decision| decision.canonical_name.clone()),
             original_path: path_string.clone(),
             current_path: path_string.clone(),
             extension: extension.clone(),
@@ -578,12 +733,26 @@ impl DataStore {
         };
 
         self.upsert_document(&doc)?;
-        self.write_audit(doc.id.as_str(), "imported", "system", "Document imported into canonical store", false)?;
+        self.write_audit(
+            doc.id.as_str(),
+            "imported",
+            "system",
+            "Document imported into canonical store",
+            false,
+        )?;
 
         let mut run_embedding_provider = None;
+        let mut optional_sidecar_errors = Vec::new();
         let chunks = if let Some(text) = &doc.extracted_text {
             stage_start = std::time::Instant::now();
-            let chunks = chunk_text(&doc.id, &doc.hash, text, &extension, DEFAULT_CHUNK_TARGET_TOKENS, DEFAULT_CHUNK_OVERLAP_TOKENS);
+            let chunks = chunk_text(
+                &doc.id,
+                &doc.hash,
+                text,
+                &extension,
+                DEFAULT_CHUNK_TARGET_TOKENS,
+                DEFAULT_CHUNK_OVERLAP_TOKENS,
+            );
             self.replace_chunks(&doc, &chunks)?;
             timings.push(stage_timing("chunk", stage_start.elapsed(), "complete"));
 
@@ -593,17 +762,52 @@ impl DataStore {
             timings.push(stage_timing("embed", stage_start.elapsed(), "complete"));
 
             stage_start = std::time::Instant::now();
-            self.index_meilisearch(&doc, &chunks).ok();
-            timings.push(stage_timing("lexical_index", stage_start.elapsed(), "complete"));
+            match self.index_meilisearch(&doc, &chunks) {
+                Ok(()) => timings.push(stage_timing(
+                    "lexical_index",
+                    stage_start.elapsed(),
+                    "complete",
+                )),
+                Err(err) => {
+                    optional_sidecar_errors.push(format!("lexical_index: {err}"));
+                    timings.push(stage_timing(
+                        "lexical_index",
+                        stage_start.elapsed(),
+                        "warning",
+                    ));
+                }
+            }
 
             stage_start = std::time::Instant::now();
-            self.write_graph_edges_for_document(&doc).ok();
-            self.mirror_falkordb_document(&doc).ok();
-            timings.push(stage_timing("graph_index", stage_start.elapsed(), "complete"));
+            match self
+                .write_graph_edges_for_document(&doc)
+                .and_then(|_| self.mirror_falkordb_document(&doc))
+            {
+                Ok(()) => timings.push(stage_timing(
+                    "graph_index",
+                    stage_start.elapsed(),
+                    "complete",
+                )),
+                Err(err) => {
+                    optional_sidecar_errors.push(format!("graph_index: {err}"));
+                    timings.push(stage_timing(
+                        "graph_index",
+                        stage_start.elapsed(),
+                        "warning",
+                    ));
+                }
+            }
 
             stage_start = std::time::Instant::now();
-            self.cache_hot_path(&doc).ok();
-            timings.push(stage_timing("hot_cache", stage_start.elapsed(), "complete"));
+            match self.cache_hot_path(&doc) {
+                Ok(()) => {
+                    timings.push(stage_timing("hot_cache", stage_start.elapsed(), "complete"))
+                }
+                Err(err) => {
+                    optional_sidecar_errors.push(format!("hot_cache: {err}"));
+                    timings.push(stage_timing("hot_cache", stage_start.elapsed(), "warning"));
+                }
+            }
             chunks
         } else {
             self.create_review_item(ReviewItem {
@@ -612,7 +816,9 @@ impl DataStore {
                 reason: "extraction_warning".to_string(),
                 severity: "warning".to_string(),
                 title: "Text extraction unavailable".to_string(),
-                explanation: extraction.warning.unwrap_or_else(|| "No text could be extracted from this file.".to_string()),
+                explanation: extraction
+                    .warning
+                    .unwrap_or_else(|| "No text could be extracted from this file.".to_string()),
                 proposed_action: None,
                 created_at: now(),
                 resolved: None,
@@ -621,6 +827,14 @@ impl DataStore {
         };
 
         let mut run = PipelineRun::complete(run_id, Some(doc.id.clone()), path_string, timings);
+        if !optional_sidecar_errors.is_empty() {
+            run.status = "warning".to_string();
+            run.retryable = true;
+            run.failure = Some(PipelineFailure {
+                stage: "sidecar_indexing".to_string(),
+                message: optional_sidecar_errors.join("; "),
+            });
+        }
         run.indexed_chunk_count = chunks.len();
         run.ocr_confidence = extraction.ocr_confidence;
         run.embedding_provider = if chunks.is_empty() {
@@ -632,11 +846,18 @@ impl DataStore {
         run.updated_at = now();
         self.upsert_pipeline_run(&run)?;
         let _ = started;
-        Ok(IngestOutcome { document: Some(doc), chunks, run })
+        Ok(IngestOutcome {
+            document: Some(doc),
+            chunks,
+            run,
+        })
     }
 
     pub fn upsert_document(&self, doc: &DocumentRecord) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "INSERT OR REPLACE INTO documents(
                 id, original_name, current_name, suggested_name, original_path, current_path,
@@ -670,14 +891,28 @@ impl DataStore {
     }
 
     pub fn get_document(&self, id: &str) -> Result<Option<DocumentRecord>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
-        conn.query_row("SELECT * FROM documents WHERE id = ?1", params![id], row_to_document)
-            .optional()
-            .map_err(Into::into)
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        conn.query_row(
+            "SELECT * FROM documents WHERE id = ?1",
+            params![id],
+            row_to_document,
+        )
+        .optional()
+        .map_err(Into::into)
     }
 
-    pub fn update_document_tags(&self, id: &str, tags: &[String]) -> Result<Option<DocumentRecord>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+    pub fn update_document_tags(
+        &self,
+        id: &str,
+        tags: &[String],
+    ) -> Result<Option<DocumentRecord>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "UPDATE documents SET tags_json = ?1, updated_at = ?2 WHERE id = ?3",
             params![serde_json::to_string(tags)?, now(), id],
@@ -688,23 +923,41 @@ impl DataStore {
     }
 
     pub fn find_document_by_hash(&self, hash: &str) -> Result<Option<DocumentRecord>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
-        conn.query_row("SELECT * FROM documents WHERE hash = ?1", params![hash], row_to_document)
-            .optional()
-            .map_err(Into::into)
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        conn.query_row(
+            "SELECT * FROM documents WHERE hash = ?1",
+            params![hash],
+            row_to_document,
+        )
+        .optional()
+        .map_err(Into::into)
     }
 
     pub fn list_documents(&self, limit: usize, offset: usize) -> Result<Vec<DocumentRecord>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
-        let mut stmt = conn.prepare("SELECT * FROM documents ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2")?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let mut stmt =
+            conn.prepare("SELECT * FROM documents ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2")?;
         let rows = stmt.query_map(params![limit as i64, offset as i64], row_to_document)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     pub fn replace_chunks(&self, doc: &DocumentRecord, chunks: &[DocumentChunk]) -> Result<()> {
-        let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM chunks_fts WHERE document_id = ?1", params![doc.id])?;
+        tx.execute(
+            "DELETE FROM chunks_fts WHERE document_id = ?1",
+            params![doc.id],
+        )?;
         tx.execute("DELETE FROM chunks WHERE document_id = ?1", params![doc.id])?;
         for chunk in chunks {
             tx.execute(
@@ -732,17 +985,24 @@ impl DataStore {
     }
 
     pub fn chunks_for_document(&self, document_id: &str) -> Result<Vec<DocumentChunk>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, document_id, chunk_index, text, token_start, token_end, text_hash, source_stage, created_at
              FROM chunks WHERE document_id = ?1 ORDER BY chunk_index",
         )?;
         let rows = stmt.query_map(params![document_id], row_to_chunk)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     pub fn search(&self, query: &str, mode: SearchMode, top_k: usize) -> Result<RetrievalTrace> {
-        let trace_id = stable_id("trace", format!("{}:{:?}:{}", query, mode, now()).as_bytes());
+        let trace_id = stable_id(
+            "trace",
+            format!("{}:{:?}:{}", query, mode, now()).as_bytes(),
+        );
         let mut stages = Vec::new();
         let mut candidates = Vec::new();
         let per_stage_limit = top_k.saturating_mul(4).max(top_k).max(1);
@@ -755,7 +1015,11 @@ impl DataStore {
                 count: lexical.len(),
                 elapsed_ms: start.elapsed().as_millis() as u64,
                 degraded: self.meili.is_none(),
-                message: if self.meili.is_some() { None } else { Some("Using SQLite FTS fallback".to_string()) },
+                message: if self.meili.is_some() {
+                    None
+                } else {
+                    Some("Using SQLite FTS fallback".to_string())
+                },
             });
             candidates.append(&mut lexical);
         }
@@ -767,8 +1031,12 @@ impl DataStore {
                 stage: "semantic_fusion".to_string(),
                 count: semantic.len(),
                 elapsed_ms: start.elapsed().as_millis() as u64,
-                degraded: self.lancedb.is_none() && self.embedding.is_none() && self.model2vec.is_none(),
-                message: Some("Merged LanceDB, Jina, and model2vec semantic candidates".to_string()),
+                degraded: self.lancedb.is_none()
+                    && self.embedding.is_none()
+                    && self.model2vec.is_none(),
+                message: Some(
+                    "Merged LanceDB, Jina, and model2vec semantic candidates".to_string(),
+                ),
             });
             candidates.append(&mut semantic);
         }
@@ -786,7 +1054,11 @@ impl DataStore {
                 count,
                 elapsed_ms: start.elapsed().as_millis() as u64,
                 degraded: self.falkordb.is_none(),
-                message: if self.falkordb.is_some() { None } else { Some("Using SQLite graph edge fallback".to_string()) },
+                message: if self.falkordb.is_some() {
+                    None
+                } else {
+                    Some("Using SQLite graph edge fallback".to_string())
+                },
             });
             candidates.append(&mut graph);
             count
@@ -795,7 +1067,8 @@ impl DataStore {
         };
 
         let start = std::time::Instant::now();
-        let mut merged = rrf_merge_candidates(candidates, top_k.saturating_mul(2).max(top_k).max(1));
+        let mut merged =
+            rrf_merge_candidates(candidates, top_k.saturating_mul(2).max(top_k).max(1));
         let mut reranked = false;
         if let Some(reranker) = &self.reranker {
             if let Ok(results) = reranker.rerank(query, &merged, top_k.max(1)) {
@@ -810,7 +1083,11 @@ impl DataStore {
             count: merged.len(),
             elapsed_ms: start.elapsed().as_millis() as u64,
             degraded: !reranked,
-            message: if reranked { None } else { Some("ColBERT unavailable; returning RRF ranking".to_string()) },
+            message: if reranked {
+                None
+            } else {
+                Some("ColBERT unavailable; returning RRF ranking".to_string())
+            },
         });
         merged.truncate(top_k);
         let trace = RetrievalTrace {
@@ -818,8 +1095,16 @@ impl DataStore {
             query: query.to_string(),
             mode,
             top_k,
-            lexical_count: stages.iter().find(|s| s.stage.contains("meilisearch")).map(|s| s.count).unwrap_or(0),
-            semantic_count: stages.iter().filter(|s| s.stage.contains("semantic")).map(|s| s.count).sum(),
+            lexical_count: stages
+                .iter()
+                .find(|s| s.stage.contains("meilisearch"))
+                .map(|s| s.count)
+                .unwrap_or(0),
+            semantic_count: stages
+                .iter()
+                .filter(|s| s.stage.contains("semantic"))
+                .map(|s| s.count)
+                .sum(),
             graph_count,
             reranked,
             stages,
@@ -831,28 +1116,46 @@ impl DataStore {
     }
 
     pub fn store_preference_event(&self, event: PreferenceEvent) -> Result<LearnedPreference> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "INSERT OR REPLACE INTO preference_events(id, category, signal, value, source, confidence, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![event.id, event.category, event.signal, event.value, event.source, event.confidence, event.created_at],
         )?;
         drop(conn);
-        self.promote_preference(&event.category, &preference_key(&event.signal), &event.value)
+        self.promote_preference(
+            &event.category,
+            &preference_key(&event.signal),
+            &event.value,
+        )
     }
 
     pub fn list_preferences(&self) -> Result<Vec<LearnedPreference>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, category, key, value, confidence, status, evidence_count, created_at, updated_at
              FROM learned_preferences ORDER BY confidence DESC, updated_at DESC",
         )?;
         let rows = stmt.query_map([], row_to_preference)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
-    pub fn set_preference_status(&self, id: &str, status: &str) -> Result<Option<LearnedPreference>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+    pub fn set_preference_status(
+        &self,
+        id: &str,
+        status: &str,
+    ) -> Result<Option<LearnedPreference>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "UPDATE learned_preferences SET status = ?1, updated_at = ?2 WHERE id = ?3",
             params![status, now(), id],
@@ -867,18 +1170,25 @@ impl DataStore {
     }
 
     pub fn list_pipeline_runs(&self, limit: usize, offset: usize) -> Result<Vec<PipelineRun>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, document_id, file_path, status, stage_timings_json, failure_json, retryable,
                     indexed_chunk_count, ocr_confidence, embedding_provider, rerank_status, created_at, updated_at
              FROM pipeline_runs ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
         )?;
         let rows = stmt.query_map(params![limit as i64, offset as i64], row_to_pipeline_run)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     pub fn get_pipeline_run(&self, id: &str) -> Result<Option<PipelineRun>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.query_row(
             "SELECT id, document_id, file_path, status, stage_timings_json, failure_json, retryable,
                     indexed_chunk_count, ocr_confidence, embedding_provider, rerank_status, created_at, updated_at
@@ -891,18 +1201,28 @@ impl DataStore {
     }
 
     pub fn list_review_items(&self, limit: usize, offset: usize) -> Result<Vec<ReviewItem>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, document_id, reason, severity, title, explanation, proposed_action_json, created_at, resolved
              FROM review_items ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
         )?;
         let rows = stmt.query_map(params![limit as i64, offset as i64], row_to_review)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     pub fn resolve_review(&self, id: &str, resolved: bool) -> Result<Option<ReviewItem>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
-        conn.execute("UPDATE review_items SET resolved = ?1 WHERE id = ?2", params![if resolved { 1 } else { 0 }, id])?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        conn.execute(
+            "UPDATE review_items SET resolved = ?1 WHERE id = ?2",
+            params![if resolved { 1 } else { 0 }, id],
+        )?;
         conn.query_row(
             "SELECT id, document_id, reason, severity, title, explanation, proposed_action_json, created_at, resolved
              FROM review_items WHERE id = ?1",
@@ -914,17 +1234,24 @@ impl DataStore {
     }
 
     pub fn list_audit_entries(&self, limit: usize, offset: usize) -> Result<Vec<AuditEntry>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, document_id, action, actor, summary, before_json, after_json, reversible, created_at
              FROM audit_entries ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
         )?;
         let rows = stmt.query_map(params![limit as i64, offset as i64], row_to_audit)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     pub fn document_summary(&self) -> Result<(usize, u64)> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let (count, total_bytes): (i64, i64) = conn.query_row(
             "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM documents",
             [],
@@ -934,7 +1261,10 @@ impl DataStore {
     }
 
     pub fn pipeline_summary(&self) -> Result<(usize, usize, usize, usize, usize)> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let (pending, processing, review, complete_today, errors): (i64, i64, i64, i64, i64) = conn.query_row(
             "
             SELECT
@@ -958,7 +1288,10 @@ impl DataStore {
     }
 
     pub fn count_review_items(&self) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM review_items WHERE COALESCE(resolved, 0) = 0",
             [],
@@ -973,7 +1306,10 @@ impl DataStore {
         status: &str,
         error_message: Option<&str>,
     ) -> Result<Option<PipelineRun>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "UPDATE pipeline_runs SET status = ?1, failure_json = ?2, updated_at = ?3 WHERE id = ?4",
             params![
@@ -995,17 +1331,24 @@ impl DataStore {
     }
 
     pub fn audit_entries_for_document(&self, document_id: &str) -> Result<Vec<AuditEntry>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, document_id, action, actor, summary, before_json, after_json, reversible, created_at
              FROM audit_entries WHERE document_id = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![document_id], row_to_audit)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     pub fn get_retrieval_trace(&self, id: &str) -> Result<Option<RetrievalTrace>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let trace_json: Option<String> = conn
             .query_row(
                 "SELECT trace_json FROM retrieval_traces WHERE id = ?1",
@@ -1026,7 +1369,10 @@ impl DataStore {
                 }
             }
         }
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         if query.trim().is_empty() {
             let mut stmt = conn.prepare(
                 "SELECT c.id, c.document_id, d.current_name, d.current_path, c.text, 1.0
@@ -1036,7 +1382,9 @@ impl DataStore {
             let rows = stmt.query_map(params![limit as i64], |row| {
                 Ok(candidate_from_row(row, "lexical")?)
             })?;
-            return rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into);
+            return rows
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(Into::into);
         }
         let fts_query = fts5_query(query);
         if fts_query.is_empty() {
@@ -1052,23 +1400,42 @@ impl DataStore {
         let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
             Ok(candidate_from_row(row, "lexical")?)
         })?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     fn semantic_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
-        let jina_query_vector = self.embedding.as_ref().and_then(|client| client.embed_one(query).ok());
+        let jina_query_vector = self
+            .embedding
+            .as_ref()
+            .and_then(|client| client.embed_one(query).ok());
         let mut out = Vec::new();
         if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref()) {
             if let Ok(mut results) = lancedb.search(query_vector, limit) {
                 out.append(&mut results);
             }
         }
-        if let Some(mut jina) = self.semantic_search_table("embeddings", "semantic_jina", query, limit, jina_query_vector.as_deref())? {
+        if let Some(mut jina) = self.semantic_search_table(
+            "embeddings",
+            "semantic_jina",
+            query,
+            limit,
+            jina_query_vector.as_deref(),
+        )? {
             out.append(&mut jina);
         }
         if self.model2vec.is_some() {
-            let model2vec_query = self.model2vec.as_ref().and_then(|client| client.embed_one(query).ok());
-            if let Some(mut model2vec) = self.semantic_search_table("embeddings_model2vec", "semantic_model2vec", query, limit, model2vec_query.as_deref())? {
+            let model2vec_query = self
+                .model2vec
+                .as_ref()
+                .and_then(|client| client.embed_one(query).ok());
+            if let Some(mut model2vec) = self.semantic_search_table(
+                "embeddings_model2vec",
+                "semantic_model2vec",
+                query,
+                limit,
+                model2vec_query.as_deref(),
+            )? {
                 out.append(&mut model2vec);
             }
         }
@@ -1086,7 +1453,10 @@ impl DataStore {
 
         loop {
             let pending = {
-                let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+                let conn = self
+                    .conn
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
                 let mut stmt = conn.prepare(
                     "SELECT c.id, c.document_id, c.chunk_index, c.text, c.token_start, c.token_end, c.text_hash, c.source_stage, c.created_at
                      FROM chunks c
@@ -1103,14 +1473,21 @@ impl DataStore {
                 break;
             }
 
-            let texts = pending.iter().map(|chunk| chunk.text.clone()).collect::<Vec<_>>();
+            let texts = pending
+                .iter()
+                .map(|chunk| chunk.text.clone())
+                .collect::<Vec<_>>();
             let embeddings = client.embed_batch(&texts)?;
-            let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+            let mut conn = self
+                .conn
+                .lock()
+                .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
             let tx = conn.transaction()?;
             for (chunk, vector) in pending.iter().zip(embeddings.iter()) {
                 let vector_json = serde_json::to_string(vector)?;
                 let vector_hash = sha256_hex(vector_json.as_bytes());
-                let profile = build_matryoshka_profile(&client.model_name, chunk, vector, vector.len());
+                let profile =
+                    build_matryoshka_profile(&client.model_name, chunk, vector, vector.len());
                 tx.execute(
                     "INSERT OR REPLACE INTO embeddings_model2vec(
                         chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
@@ -1150,7 +1527,10 @@ impl DataStore {
         limit: usize,
         query_vector: Option<&[f32]>,
     ) -> Result<Option<Vec<RetrievalCandidate>>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let sql = format!(
             "SELECT c.id, c.document_id, d.current_name, d.current_path, c.text, e.vector_json
              FROM {table} e
@@ -1186,9 +1566,18 @@ impl DataStore {
     }
 
     fn write_embeddings(&self, chunks: &[DocumentChunk]) -> Result<String> {
-        let texts = chunks.iter().map(|chunk| chunk.text.clone()).collect::<Vec<_>>();
-        let jina_embeddings = self.embedding.as_ref().and_then(|client| client.embed_batch(&texts).ok());
-        let model2vec_embeddings = self.model2vec.as_ref().and_then(|client| client.embed_batch(&texts).ok());
+        let texts = chunks
+            .iter()
+            .map(|chunk| chunk.text.clone())
+            .collect::<Vec<_>>();
+        let jina_embeddings = self
+            .embedding
+            .as_ref()
+            .and_then(|client| client.embed_batch(&texts).ok());
+        let model2vec_embeddings = self
+            .model2vec
+            .as_ref()
+            .and_then(|client| client.embed_batch(&texts).ok());
         let jina_provider = jina_embeddings
             .as_ref()
             .and_then(|batch| batch.first())
@@ -1204,7 +1593,10 @@ impl DataStore {
         } else {
             jina_provider.clone()
         };
-        let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let tx = conn.transaction()?;
         let mut lance_records = Vec::new();
         for (index, chunk) in chunks.iter().enumerate() {
@@ -1215,7 +1607,8 @@ impl DataStore {
                 .unwrap_or_else(|| hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM));
             let jina_vector_json = serde_json::to_string(&jina_vector)?;
             let jina_vector_hash = sha256_hex(jina_vector_json.as_bytes());
-            let jina_profile = build_matryoshka_profile(&jina_provider, chunk, &jina_vector, jina_vector.len());
+            let jina_profile =
+                build_matryoshka_profile(&jina_provider, chunk, &jina_vector, jina_vector.len());
             tx.execute(
                 "INSERT OR REPLACE INTO embeddings(
                     chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
@@ -1248,7 +1641,8 @@ impl DataStore {
                     let vector = embedding.clone();
                     let vector_json = serde_json::to_string(&vector)?;
                     let vector_hash = sha256_hex(vector_json.as_bytes());
-                    let profile = build_matryoshka_profile(&model2vec_provider, chunk, &vector, vector.len());
+                    let profile =
+                        build_matryoshka_profile(&model2vec_provider, chunk, &vector, vector.len());
                     tx.execute(
                         "INSERT OR REPLACE INTO embeddings_model2vec(
                             chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
@@ -1279,7 +1673,10 @@ impl DataStore {
     }
 
     fn write_graph_edges_for_document(&self, doc: &DocumentRecord) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         for tag in &doc.tags {
             if tag.trim().is_empty() {
                 continue;
@@ -1321,11 +1718,18 @@ impl DataStore {
         Ok(())
     }
 
-    fn graph_expand_candidates(&self, seed_document_ids: &[String], limit: usize) -> Result<Vec<RetrievalCandidate>> {
+    fn graph_expand_candidates(
+        &self,
+        seed_document_ids: &[String],
+        limit: usize,
+    ) -> Result<Vec<RetrievalCandidate>> {
         if seed_document_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut out = Vec::new();
         for seed in seed_document_ids.iter().take(GRAPH_EXPANSION_LIMIT) {
             let mut stmt = conn.prepare(
@@ -1352,7 +1756,10 @@ impl DataStore {
     }
 
     fn upsert_pipeline_run(&self, run: &PipelineRun) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "INSERT OR REPLACE INTO pipeline_runs(
                 id, document_id, file_path, status, stage_timings_json, failure_json, retryable,
@@ -1378,7 +1785,10 @@ impl DataStore {
     }
 
     fn create_review_item(&self, item: ReviewItem) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "INSERT OR REPLACE INTO review_items(id, document_id, reason, severity, title, explanation, proposed_action_json, created_at, resolved)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -1397,8 +1807,18 @@ impl DataStore {
         Ok(())
     }
 
-    fn write_audit(&self, document_id: &str, action: &str, actor: &str, summary: &str, reversible: bool) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+    fn write_audit(
+        &self,
+        document_id: &str,
+        action: &str,
+        actor: &str,
+        summary: &str,
+        reversible: bool,
+    ) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "INSERT INTO audit_entries(id, document_id, action, actor, summary, reversible, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -1424,17 +1844,34 @@ impl DataStore {
     }
 
     fn store_retrieval_trace(&self, trace: &RetrievalTrace) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "INSERT OR REPLACE INTO retrieval_traces(id, query, mode, trace_json, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![trace.id, trace.query, format!("{:?}", trace.mode).to_ascii_lowercase(), serde_json::to_string(trace)?, trace.created_at],
+            params![
+                trace.id,
+                trace.query,
+                format!("{:?}", trace.mode).to_ascii_lowercase(),
+                serde_json::to_string(trace)?,
+                trace.created_at
+            ],
         )?;
         Ok(())
     }
 
-    fn promote_preference(&self, category: &str, signal: &str, value: &str) -> Result<LearnedPreference> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+    fn promote_preference(
+        &self,
+        category: &str,
+        signal: &str,
+        value: &str,
+    ) -> Result<LearnedPreference> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT signal, confidence, created_at FROM preference_events WHERE category = ?1 AND value = ?2",
         )?;
@@ -1472,7 +1909,9 @@ impl DataStore {
         };
         let volume = (count as f32 / 5.0).min(1.0);
         let opposition_ratio = if total > 0.0 { opposition / total } else { 0.0 };
-        let confidence = ((agreement * 0.65) + (avg_positive * 0.25) + (volume * 0.10) - (opposition_ratio * 0.15)).clamp(0.0, 1.0);
+        let confidence = ((agreement * 0.65) + (avg_positive * 0.25) + (volume * 0.10)
+            - (opposition_ratio * 0.15))
+            .clamp(0.0, 1.0);
         let status = if confidence >= 0.80 && positive_events >= 3 && opposition_ratio < 0.20 {
             "pending_review"
         } else {
@@ -1511,7 +1950,9 @@ pub struct IngestConfig {
 
 impl Default for IngestConfig {
     fn default() -> Self {
-        Self { ocr_language: "eng".to_string() }
+        Self {
+            ocr_language: "eng".to_string(),
+        }
     }
 }
 
@@ -1523,7 +1964,12 @@ pub struct IngestOutcome {
 }
 
 impl PipelineRun {
-    fn complete(id: String, document_id: Option<String>, file_path: String, stage_timings: Vec<StageTiming>) -> Self {
+    fn complete(
+        id: String,
+        document_id: Option<String>,
+        file_path: String,
+        stage_timings: Vec<StageTiming>,
+    ) -> Self {
         let ts = now();
         Self {
             id,
@@ -1558,7 +2004,10 @@ impl PipelineRun {
             file_path,
             status: "error".to_string(),
             stage_timings,
-            failure: Some(PipelineFailure { stage: stage.into(), message: message.into() }),
+            failure: Some(PipelineFailure {
+                stage: stage.into(),
+                message: message.into(),
+            }),
             retryable,
             indexed_chunk_count: 0,
             ocr_confidence: None,
@@ -1588,24 +2037,31 @@ pub fn chunk_text(
         .flat_map(|(section_stage, section_text)| {
             chunk_by_semantic_token_budget(&section_text, target_tokens, overlap_tokens)
                 .into_iter()
-                .map(move |(chunk_text, token_start, token_end)| (section_stage.clone(), chunk_text, token_start, token_end))
+                .map(move |(chunk_text, token_start, token_end)| {
+                    (section_stage.clone(), chunk_text, token_start, token_end)
+                })
         })
         .enumerate()
-        .map(|(index, (section_stage, chunk_text, token_start, token_end))| {
-            let text_hash = sha256_hex(chunk_text.as_bytes());
-            let id = stable_id("chunk", format!("{document_hash}:{index}:{text_hash}").as_bytes());
-            DocumentChunk {
-                id,
-                document_id: document_id.to_string(),
-                chunk_index: index,
-                text: chunk_text,
-                token_start,
-                token_end,
-                text_hash,
-                source_stage: section_stage,
-                created_at: created_at.clone(),
-            }
-        })
+        .map(
+            |(index, (section_stage, chunk_text, token_start, token_end))| {
+                let text_hash = sha256_hex(chunk_text.as_bytes());
+                let id = stable_id(
+                    "chunk",
+                    format!("{document_hash}:{index}:{text_hash}").as_bytes(),
+                );
+                DocumentChunk {
+                    id,
+                    document_id: document_id.to_string(),
+                    chunk_index: index,
+                    text: chunk_text,
+                    token_start,
+                    token_end,
+                    text_hash,
+                    source_stage: section_stage,
+                    created_at: created_at.clone(),
+                }
+            },
+        )
         .collect()
 }
 
@@ -1613,7 +2069,10 @@ fn document_sections(text: &str, extension: &str) -> Vec<(String, String)> {
     if extension == "rs" {
         if let Some(sections) = rust_structured_sections(text) {
             if !sections.is_empty() {
-                return sections.into_iter().map(|section| ("ast_section".to_string(), section)).collect();
+                return sections
+                    .into_iter()
+                    .map(|section| ("ast_section".to_string(), section))
+                    .collect();
             }
         }
     }
@@ -1625,7 +2084,9 @@ fn document_sections(text: &str, extension: &str) -> Vec<(String, String)> {
 
 fn rust_structured_sections(text: &str) -> Option<Vec<String>> {
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok()?;
+    parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .ok()?;
     let tree = parser.parse(text, None)?;
     let root = tree.root_node();
     let mut cursor = root.walk();
@@ -1633,7 +2094,16 @@ fn rust_structured_sections(text: &str) -> Option<Vec<String>> {
     for child in root.named_children(&mut cursor) {
         if matches!(
             child.kind(),
-            "function_item" | "struct_item" | "enum_item" | "trait_item" | "impl_item" | "mod_item" | "type_item" | "const_item" | "static_item" | "use_declaration"
+            "function_item"
+                | "struct_item"
+                | "enum_item"
+                | "trait_item"
+                | "impl_item"
+                | "mod_item"
+                | "type_item"
+                | "const_item"
+                | "static_item"
+                | "use_declaration"
         ) {
             if let Ok(snippet) = child.utf8_text(text.as_bytes()) {
                 let snippet = snippet.trim();
@@ -1646,10 +2116,16 @@ fn rust_structured_sections(text: &str) -> Option<Vec<String>> {
     Some(sections)
 }
 
-fn rrf_merge_candidates(candidates: Vec<RetrievalCandidate>, top_k: usize) -> Vec<RetrievalCandidate> {
+fn rrf_merge_candidates(
+    candidates: Vec<RetrievalCandidate>,
+    top_k: usize,
+) -> Vec<RetrievalCandidate> {
     let mut by_stage: BTreeMap<String, Vec<RetrievalCandidate>> = BTreeMap::new();
     for candidate in candidates {
-        by_stage.entry(candidate.source_stage.clone()).or_default().push(candidate);
+        by_stage
+            .entry(candidate.source_stage.clone())
+            .or_default()
+            .push(candidate);
     }
     for stage_candidates in by_stage.values_mut() {
         stage_candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
@@ -1737,7 +2213,13 @@ fn normalize_path_key(path: &str) -> String {
 fn normalize_title_key(title: &str) -> String {
     title
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { ' ' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -1848,7 +2330,9 @@ fn clean_query_token(token: &str) -> String {
     token
         .trim()
         .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '+' | '#' | '.' | '@' | ':'))
+        .filter(|ch| {
+            ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '+' | '#' | '.' | '@' | ':')
+        })
         .collect::<String>()
         .trim_matches('-')
         .to_ascii_lowercase()
@@ -1880,21 +2364,35 @@ fn preference_key(signal: &str) -> String {
 
 fn preference_signal_is_negative(signal: &str) -> bool {
     let lower = signal.trim().to_ascii_lowercase();
-    ["rejected_", "reject_", "dismissed_", "dismiss_", "corrected_", "correction_", "undo_"]
-        .iter()
-        .any(|prefix| lower.starts_with(prefix))
+    [
+        "rejected_",
+        "reject_",
+        "dismissed_",
+        "dismiss_",
+        "corrected_",
+        "correction_",
+        "undo_",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix))
 }
 
 fn recency_decay(created_at: &str, half_life_days: f32) -> f32 {
     let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(created_at) else {
         return 1.0;
     };
-    let age_seconds = (Utc::now() - timestamp.with_timezone(&Utc)).num_seconds().max(0) as f32;
+    let age_seconds = (Utc::now() - timestamp.with_timezone(&Utc))
+        .num_seconds()
+        .max(0) as f32;
     let age_days = age_seconds / 86_400.0;
     0.5f32.powf(age_days / half_life_days.max(1.0))
 }
 
-fn chunk_by_semantic_token_budget(text: &str, target_tokens: usize, overlap_tokens: usize) -> Vec<(String, usize, usize)> {
+fn chunk_by_semantic_token_budget(
+    text: &str,
+    target_tokens: usize,
+    overlap_tokens: usize,
+) -> Vec<(String, usize, usize)> {
     let units = semantic_units(text);
     if units.is_empty() {
         return Vec::new();
@@ -2015,6 +2513,50 @@ fn token_matrix_hash(token_matrix: &[Vec<f32>]) -> String {
     sha256_hex(&bytes)
 }
 
+fn ready_status(id: &str, name: &str, role: &str) -> RequiredServiceStatus {
+    RequiredServiceStatus {
+        id: id.to_string(),
+        name: name.to_string(),
+        role: role.to_string(),
+        status: "ready".to_string(),
+        required: true,
+        message: None,
+    }
+}
+
+fn missing_status(id: &str, name: &str, role: &str) -> RequiredServiceStatus {
+    RequiredServiceStatus {
+        id: id.to_string(),
+        name: name.to_string(),
+        role: role.to_string(),
+        status: "missing".to_string(),
+        required: true,
+        message: Some("required client is not configured".to_string()),
+    }
+}
+
+fn offline_status(
+    id: &str,
+    name: &str,
+    role: &str,
+    error: impl std::fmt::Display,
+) -> RequiredServiceStatus {
+    RequiredServiceStatus {
+        id: id.to_string(),
+        name: name.to_string(),
+        role: role.to_string(),
+        status: "offline".to_string(),
+        required: true,
+        message: Some(error.to_string()),
+    }
+}
+
+fn valkey_health_check(client: &redis::Client) -> Result<()> {
+    let mut conn = client.get_connection()?;
+    let _: String = redis::cmd("PING").query(&mut conn)?;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 struct MeilisearchClient {
     base_url: String,
@@ -2046,10 +2588,22 @@ impl MeilisearchClient {
                 })
             })
             .collect();
-        let url = format!("{}/indexes/masterd_chunks/documents?primaryKey=id", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/indexes/masterd_chunks/documents?primaryKey=id",
+            self.base_url.trim_end_matches('/')
+        );
         let response = self.client.post(url).json(&documents).send()?;
         if !response.status().is_success() {
             anyhow::bail!("meilisearch index failed: HTTP {}", response.status());
+        }
+        Ok(())
+    }
+
+    fn health_check(&self) -> Result<()> {
+        let url = format!("{}/health", self.base_url.trim_end_matches('/'));
+        let response = self.client.get(url).send()?;
+        if !response.status().is_success() {
+            anyhow::bail!("meilisearch health failed: HTTP {}", response.status());
         }
         Ok(())
     }
@@ -2070,7 +2624,10 @@ impl MeilisearchClient {
             ranking_score: Option<f32>,
         }
 
-        let url = format!("{}/indexes/masterd_chunks/search", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/indexes/masterd_chunks/search",
+            self.base_url.trim_end_matches('/')
+        );
         let response = self
             .client
             .post(url)
@@ -2170,7 +2727,9 @@ impl EmbeddingServiceClient {
         let provider = body.model.unwrap_or_else(|| self.model.clone());
         let mut vectors = if let Some(mut data) = body.data {
             data.sort_by_key(|datum| datum.index.unwrap_or(usize::MAX));
-            data.into_iter().map(|datum| datum.embedding).collect::<Vec<_>>()
+            data.into_iter()
+                .map(|datum| datum.embedding)
+                .collect::<Vec<_>>()
         } else {
             body.embeddings.unwrap_or_default()
         };
@@ -2179,7 +2738,10 @@ impl EmbeddingServiceClient {
             .into_iter()
             .map(|mut vector| {
                 normalize_vector(&mut vector);
-                StoredEmbedding { vector, provider: provider.clone() }
+                StoredEmbedding {
+                    vector,
+                    provider: provider.clone(),
+                }
             })
             .collect())
     }
@@ -2253,7 +2815,9 @@ fn parse_model2vec_embedding_response(
 ) -> Result<Vec<Vec<f32>>> {
     let mut vectors = if let Some(mut data) = body.data {
         data.sort_by_key(|datum| datum.index.unwrap_or(usize::MAX));
-        data.into_iter().map(|datum| datum.embedding).collect::<Vec<_>>()
+        data.into_iter()
+            .map(|datum| datum.embedding)
+            .collect::<Vec<_>>()
     } else {
         body.embeddings.unwrap_or_default()
     };
@@ -2278,7 +2842,12 @@ impl ColbertRerankerClient {
         }
     }
 
-    fn rerank(&self, query: &str, candidates: &[RetrievalCandidate], top_k: usize) -> Result<Vec<RetrievalCandidate>> {
+    fn rerank(
+        &self,
+        query: &str,
+        candidates: &[RetrievalCandidate],
+        top_k: usize,
+    ) -> Result<Vec<RetrievalCandidate>> {
         #[derive(Debug, Deserialize)]
         struct RerankResult {
             index: usize,
@@ -2298,7 +2867,10 @@ impl ColbertRerankerClient {
         if candidates.is_empty() {
             return Ok(Vec::new());
         }
-        let documents = candidates.iter().map(|candidate| candidate.text.clone()).collect::<Vec<_>>();
+        let documents = candidates
+            .iter()
+            .map(|candidate| candidate.text.clone())
+            .collect::<Vec<_>>();
         let url = format!("{}/v1/rerank", self.base_url.trim_end_matches('/'));
         let response = self
             .client
@@ -2323,7 +2895,10 @@ impl ColbertRerankerClient {
                 })
                 .collect::<Vec<_>>()
         } else {
-            body.results.into_iter().map(|result| (result.index, result.score)).collect()
+            body.results
+                .into_iter()
+                .map(|result| (result.index, result.score))
+                .collect()
         };
         let mut out = Vec::new();
         for (index, score) in pairs {
@@ -2442,7 +3017,19 @@ struct FalkorDbClient {
 
 impl FalkorDbClient {
     fn new(url: String) -> Result<Self> {
-        Ok(Self { client: redis::Client::open(url)? })
+        Ok(Self {
+            client: redis::Client::open(url)?,
+        })
+    }
+
+    fn health_check(&self) -> Result<()> {
+        let mut conn = self.client.get_connection()?;
+        let _: String = redis::cmd("PING").query(&mut conn)?;
+        let _: redis::Value = redis::cmd("GRAPH.QUERY")
+            .arg("masterd")
+            .arg("RETURN 1")
+            .query(&mut conn)?;
+        Ok(())
     }
 
     fn mirror_document(&self, doc: &DocumentRecord) -> Result<()> {
@@ -2460,13 +3047,19 @@ impl FalkorDbClient {
              MERGE (c:Category {{name: {}}}) MERGE (d)-[:CLASSIFIED_AS]->(c)",
             cypher_string(category)
         );
-        let _: redis::Value = redis::cmd("GRAPH.QUERY").arg("masterd").arg(query).query(&mut conn)?;
+        let _: redis::Value = redis::cmd("GRAPH.QUERY")
+            .arg("masterd")
+            .arg(query)
+            .query(&mut conn)?;
         for tag in &doc.tags {
             let query = format!(
                 "MATCH (d:Document {{id: {doc_id}}}) MERGE (t:Tag {{name: {}}}) MERGE (d)-[:HAS_TAG]->(t)",
                 cypher_string(tag)
             );
-            let _: redis::Value = redis::cmd("GRAPH.QUERY").arg("masterd").arg(query).query(&mut conn)?;
+            let _: redis::Value = redis::cmd("GRAPH.QUERY")
+                .arg("masterd")
+                .arg(query)
+                .query(&mut conn)?;
         }
         Ok(())
     }
@@ -2488,12 +3081,20 @@ fn extract_text(path: &Path, bytes: &[u8], ocr_language: &str) -> ExtractionResu
     match ext.as_str() {
         "txt" | "md" | "rst" | "log" | "csv" | "json" | "toml" | "yaml" | "yml" => {
             let text = String::from_utf8_lossy(bytes).to_string();
-            ExtractionResult { text: Some(text), ocr_confidence: None, warning: None }
+            ExtractionResult {
+                text: Some(text),
+                ocr_confidence: None,
+                warning: None,
+            }
         }
         "pdf" => {
             let text = lossy_pdf_text(bytes);
             if text.split_whitespace().count() >= 20 {
-                ExtractionResult { text: Some(text), ocr_confidence: None, warning: None }
+                ExtractionResult {
+                    text: Some(text),
+                    ocr_confidence: None,
+                    warning: None,
+                }
             } else {
                 ExtractionResult {
                     text: None,
@@ -2652,7 +3253,10 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEntry> {
     })
 }
 
-fn candidate_from_row(row: &rusqlite::Row<'_>, source_stage: &str) -> rusqlite::Result<RetrievalCandidate> {
+fn candidate_from_row(
+    row: &rusqlite::Row<'_>,
+    source_stage: &str,
+) -> rusqlite::Result<RetrievalCandidate> {
     Ok(RetrievalCandidate {
         chunk_id: row.get(0)?,
         document_id: row.get(1)?,
@@ -2665,7 +3269,11 @@ fn candidate_from_row(row: &rusqlite::Row<'_>, source_stage: &str) -> rusqlite::
 }
 
 fn to_json_opt<T: Serialize>(value: &Option<T>) -> Result<Option<String>> {
-    value.as_ref().map(serde_json::to_string).transpose().map_err(Into::into)
+    value
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(Into::into)
 }
 
 fn hashed_embedding(text: &str, dim: usize) -> Vec<f32> {
@@ -2712,7 +3320,11 @@ fn coarse_to_fine_similarity(a: &[f32], b: &[f32]) -> f32 {
         score += cosine_similarity(&a[..dim], &b[..dim]) * weight;
         weight_sum += weight;
     }
-    if weight_sum > 0.0 { score / weight_sum } else { 0.0 }
+    if weight_sum > 0.0 {
+        score / weight_sum
+    } else {
+        0.0
+    }
 }
 
 fn build_matryoshka_profile(
@@ -2810,14 +3422,25 @@ struct LocalRoutingDecision {
 
 fn routing_decision_for(path: &Path, content_hash: &str) -> Option<LocalRoutingDecision> {
     let ext = extension(path);
-    let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or("file");
-    let ext_with_dot = if ext.is_empty() { String::new() } else { format!(".{ext}") };
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file");
+    let ext_with_dot = if ext.is_empty() {
+        String::new()
+    } else {
+        format!(".{ext}")
+    };
     let hash8 = &content_hash[..content_hash.len().min(8)];
     let (route, tags): (&str, &[&str]) = match ext.as_str() {
         "pdf" => ("documents/pdf", &["pdf", "document"]),
-        "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tiff" => ("media/images", &["image", "media"]),
+        "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tiff" => {
+            ("media/images", &["image", "media"])
+        }
         "txt" | "md" | "rst" | "rtf" => ("documents/text", &["text", "document"]),
-        "rs" | "py" | "js" | "ts" | "go" | "java" | "c" | "cpp" | "h" | "hpp" => ("code", &["code"]),
+        "rs" | "py" | "js" | "ts" | "go" | "java" | "c" | "cpp" | "h" | "hpp" => {
+            ("code", &["code"])
+        }
         "xlsx" | "xls" | "csv" | "ods" => ("documents/spreadsheets", &["spreadsheet", "data"]),
         "zip" | "tar" | "gz" | "bz2" | "7z" | "rar" => ("archives", &["archive"]),
         "" => return None,
@@ -2862,7 +3485,11 @@ fn infer_tags(ext: &str, text: &str) -> Vec<String> {
 }
 
 fn summarize(text: &str) -> String {
-    let mut summary = text.split_whitespace().take(48).collect::<Vec<_>>().join(" ");
+    let mut summary = text
+        .split_whitespace()
+        .take(48)
+        .collect::<Vec<_>>()
+        .join(" ");
     if text.split_whitespace().count() > 48 {
         summary.push_str("...");
     }
@@ -2873,13 +3500,40 @@ fn summarize(text: &str) -> String {
 mod tests {
     use super::*;
 
+    fn test_sqlite_path(name: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!("masterd-data-{name}-{nonce}.sqlite"))
+    }
+
+    fn config_without_required_services(path: PathBuf) -> DataStoreConfig {
+        let mut config = DataStoreConfig::local(path);
+        config.meilisearch_url = None;
+        config.valkey_url = None;
+        config.embedding_url = None;
+        config.model2vec_url = None;
+        config.model2vec_model = None;
+        config.colbert_url = None;
+        config.lancedb_url = None;
+        config.falkordb_url = None;
+        config
+    }
+
     #[test]
     fn chunk_ids_are_stable() {
-        let text = (0..2200).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        let text = (0..2200)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let a = chunk_text("doc1", "hash1", &text, "txt", 800, 120);
         let b = chunk_text("doc1", "hash1", &text, "txt", 800, 120);
         assert_eq!(a.len(), 4);
-        assert_eq!(a.iter().map(|c| &c.id).collect::<Vec<_>>(), b.iter().map(|c| &c.id).collect::<Vec<_>>());
+        assert_eq!(
+            a.iter().map(|c| &c.id).collect::<Vec<_>>(),
+            b.iter().map(|c| &c.id).collect::<Vec<_>>()
+        );
         assert_eq!(a[1].token_start, 680);
     }
 
@@ -2930,7 +3584,8 @@ mod tests {
 
     #[test]
     fn migrations_record_version() {
-        let path = std::env::temp_dir().join(format!("masterd-data-test-{}.sqlite", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("masterd-data-test-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let mut config = DataStoreConfig::local(path.clone());
         config.meilisearch_url = None;
@@ -2947,8 +3602,136 @@ mod tests {
     }
 
     #[test]
+    fn readiness_reports_missing_required_services() {
+        let path = test_sqlite_path("readiness-missing");
+        let store = DataStore::open(config_without_required_services(path.clone())).unwrap();
+        let statuses = store.required_service_statuses();
+
+        assert!(!store.required_services_ready());
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|service| service.id == "sqlite")
+                .unwrap()
+                .status,
+            "ready"
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|service| service.id == "meilisearch")
+                .unwrap()
+                .status,
+            "missing"
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|service| service.id == "valkey")
+                .unwrap()
+                .status,
+            "missing"
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|service| service.id == "falkordb")
+                .unwrap()
+                .status,
+            "missing"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn readiness_reports_not_ready_when_required_clients_fail() {
+        let path = test_sqlite_path("readiness-offline");
+        let mut config = DataStoreConfig::local(path.clone());
+        config.meilisearch_url = Some("http://127.0.0.1:1".to_string());
+        config.valkey_url = Some("redis://127.0.0.1:1/".to_string());
+        config.falkordb_url = Some("redis://127.0.0.1:1/".to_string());
+        config.embedding_url = None;
+        config.model2vec_url = None;
+        config.model2vec_model = None;
+        config.colbert_url = None;
+        config.lancedb_url = None;
+
+        let store = DataStore::open(config).unwrap();
+        let statuses = store.required_service_statuses();
+
+        assert!(!store.required_services_ready());
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|service| service.id == "meilisearch")
+                .unwrap()
+                .status,
+            "offline"
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|service| service.id == "valkey")
+                .unwrap()
+                .status,
+            "offline"
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|service| service.id == "falkordb")
+                .unwrap()
+                .status,
+            "offline"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn ingest_file_creates_retryable_failed_run_when_required_services_missing() {
+        let db_path = test_sqlite_path("ingest-preflight");
+        let input_path = std::env::temp_dir().join(format!(
+            "masterd-data-ingest-preflight-{}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&input_path, "alpha beta gamma").unwrap();
+        let store = DataStore::open(config_without_required_services(db_path.clone())).unwrap();
+
+        let outcome = store
+            .ingest_file(
+                &input_path,
+                &IngestConfig {
+                    ocr_language: "eng".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert!(outcome.document.is_none());
+        assert!(outcome.chunks.is_empty());
+        assert_eq!(outcome.run.status, "error");
+        assert!(outcome.run.retryable);
+        assert_eq!(
+            outcome.run.failure.as_ref().unwrap().stage,
+            "required_services"
+        );
+        assert!(
+            outcome
+                .run
+                .failure
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("meilisearch")
+        );
+        assert_eq!(store.document_summary().unwrap(), (0, 0));
+        let _ = std::fs::remove_file(input_path);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
     fn preference_promotes_after_evidence() {
-        let path = std::env::temp_dir().join(format!("masterd-pref-test-{}.sqlite", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("masterd-pref-test-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let mut config = DataStoreConfig::local(path.clone());
         config.meilisearch_url = None;
@@ -2962,15 +3745,19 @@ mod tests {
         let store = DataStore::open(config).unwrap();
         let mut last = None;
         for i in 0..3 {
-            last = Some(store.store_preference_event(PreferenceEvent {
-                id: format!("e{i}"),
-                category: "naming".into(),
-                signal: "prefix".into(),
-                value: "date".into(),
-                source: "test".into(),
-                confidence: 0.95,
-                created_at: now(),
-            }).unwrap());
+            last = Some(
+                store
+                    .store_preference_event(PreferenceEvent {
+                        id: format!("e{i}"),
+                        category: "naming".into(),
+                        signal: "prefix".into(),
+                        value: "date".into(),
+                        source: "test".into(),
+                        confidence: 0.95,
+                        created_at: now(),
+                    })
+                    .unwrap(),
+            );
         }
         assert_eq!(last.unwrap().status, "pending_review");
         let _ = std::fs::remove_file(path);
@@ -2978,7 +3765,10 @@ mod tests {
 
     #[test]
     fn rejected_evidence_suppresses_preference_promotion() {
-        let path = std::env::temp_dir().join(format!("masterd-pref-neg-test-{}.sqlite", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "masterd-pref-neg-test-{}.sqlite",
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&path);
         let mut config = DataStoreConfig::local(path.clone());
         config.meilisearch_url = None;
@@ -2991,25 +3781,29 @@ mod tests {
         config.falkordb_url = None;
         let store = DataStore::open(config).unwrap();
         for i in 0..3 {
-            let _ = store.store_preference_event(PreferenceEvent {
-                id: format!("accept-{i}"),
+            let _ = store
+                .store_preference_event(PreferenceEvent {
+                    id: format!("accept-{i}"),
+                    category: "naming".into(),
+                    signal: "accepted_prefix".into(),
+                    value: "date".into(),
+                    source: "test".into(),
+                    confidence: 0.95,
+                    created_at: now(),
+                })
+                .unwrap();
+        }
+        let learned = store
+            .store_preference_event(PreferenceEvent {
+                id: "reject-1".into(),
                 category: "naming".into(),
-                signal: "accepted_prefix".into(),
+                signal: "rejected_prefix".into(),
                 value: "date".into(),
                 source: "test".into(),
                 confidence: 0.95,
                 created_at: now(),
-            }).unwrap();
-        }
-        let learned = store.store_preference_event(PreferenceEvent {
-            id: "reject-1".into(),
-            category: "naming".into(),
-            signal: "rejected_prefix".into(),
-            value: "date".into(),
-            source: "test".into(),
-            confidence: 0.95,
-            created_at: now(),
-        }).unwrap();
+            })
+            .unwrap();
         assert_eq!(learned.status, "learning");
         assert!(learned.confidence < 0.80);
         let _ = std::fs::remove_file(path);

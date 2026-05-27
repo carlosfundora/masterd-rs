@@ -1,7 +1,11 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
-use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use chrono::Local;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+use tokio::sync::Mutex;
 
 use masterd_chat_engine::{ChatEngine, ChatEngineConfig, ChatSession};
 use masterd_data::{DataStore, DataStoreConfig};
@@ -64,8 +68,11 @@ impl Default for AppConfig {
             jina_url: "http://127.0.0.1:11447".into(),
             intake_max_depth: 3,
             intake_extensions: vec![
-                "txt".into(), "md".into(), "rst".into(),
-                "log".into(), "pdf".into(),
+                "txt".into(),
+                "md".into(),
+                "rst".into(),
+                "log".into(),
+                "pdf".into(),
             ],
             ollama_url: "http://127.0.0.1:11434".into(),
             ollama_model: "llama3.2".into(),
@@ -76,6 +83,51 @@ impl Default for AppConfig {
 const MAX_JSON_LOG_BYTES: u64 = 10 * 1024 * 1024;
 
 pub type SessionMap = Arc<Mutex<HashMap<String, ChatSession>>>;
+
+pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let mut tmp_path = path.to_path_buf();
+    tmp_path.set_extension(format!(
+        "{}.tmp.{}.{}",
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("json"),
+        std::process::id(),
+        nonce
+    ));
+
+    let write_result = (|| {
+        use std::io::Write;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp_path)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp_path, path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+
+    write_result
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,46 +158,65 @@ pub struct IntakeQueueItem {
 /// All runtime directories that are created on first launch.
 pub struct AppDirs {
     /// ~/.local/share/com.masterd.desktop/
-    pub data:     PathBuf,
+    pub data: PathBuf,
     /// ~/.local/share/com.masterd.desktop/index/
-    pub index:    PathBuf,
+    pub index: PathBuf,
     /// ~/.local/share/com.masterd.desktop/intake/
-    pub intake:   PathBuf,
+    pub intake: PathBuf,
     /// ~/.local/share/com.masterd.desktop/watchers/
     pub watchers: PathBuf,
     /// ~/.local/share/com.masterd.desktop/models/
-    pub models:   PathBuf,
+    pub models: PathBuf,
     /// ~/.local/share/com.masterd.desktop/data/
     pub user_data: PathBuf,
     /// ~/.config/com.masterd.desktop/
-    pub config:   PathBuf,
+    pub config: PathBuf,
     /// ~/.cache/com.masterd.desktop/
-    pub cache:    PathBuf,
+    pub cache: PathBuf,
     /// ~/.local/state/com.masterd.desktop/logs/
-    pub logs:     PathBuf,
+    pub logs: PathBuf,
 }
 
 impl AppDirs {
     /// Create every directory that MASTERd needs.  Safe to call every launch —
     /// `create_dir_all` is a no-op when the directory already exists.
     pub fn create_all(
-        data_dir:   PathBuf,
+        data_dir: PathBuf,
         config_dir: PathBuf,
-        cache_dir:  PathBuf,
-        log_dir:    PathBuf,
+        cache_dir: PathBuf,
+        log_dir: PathBuf,
     ) -> std::io::Result<Self> {
-        let index    = data_dir.join("index");
-        let intake   = data_dir.join("intake");
+        let index = data_dir.join("index");
+        let intake = data_dir.join("intake");
         let watchers = data_dir.join("watchers");
-        let models   = data_dir.join("models");
+        let models = data_dir.join("models");
         let user_data = data_dir.join("data");
 
-        for dir in &[&data_dir, &index, &intake, &watchers, &models,
-                     &user_data, &config_dir, &cache_dir, &log_dir] {
+        for dir in &[
+            &data_dir,
+            &index,
+            &intake,
+            &watchers,
+            &models,
+            &user_data,
+            &config_dir,
+            &cache_dir,
+            &log_dir,
+        ] {
             std::fs::create_dir_all(dir)?;
         }
 
-        let dirs = Self { data: data_dir, index, intake, watchers, models, user_data, config: config_dir, cache: cache_dir, logs: log_dir };
+        let dirs = Self {
+            data: data_dir,
+            index,
+            intake,
+            watchers,
+            models,
+            user_data,
+            config: config_dir,
+            cache: cache_dir,
+            logs: log_dir,
+        };
 
         tracing::info!("MASTERd data:      {}", dirs.data.display());
         tracing::info!("MASTERd user data: {}", dirs.user_data.display());
@@ -157,11 +228,21 @@ impl AppDirs {
         Ok(dirs)
     }
 
-    pub fn watchers_json(&self) -> PathBuf { self.watchers.join("watch-folders.json") }
-    pub fn index_snapshot_json(&self) -> PathBuf { self.index.join("snapshot.json") }
-    pub fn intake_queue_json(&self) -> PathBuf { self.intake.join("queue.json") }
-    pub fn config_json(&self) -> PathBuf { self.config.join("app-config.json") }
-    pub fn event_log_jsonl(&self) -> PathBuf { self.logs.join("masterd-events.jsonl") }
+    pub fn watchers_json(&self) -> PathBuf {
+        self.watchers.join("watch-folders.json")
+    }
+    pub fn index_snapshot_json(&self) -> PathBuf {
+        self.index.join("snapshot.json")
+    }
+    pub fn intake_queue_json(&self) -> PathBuf {
+        self.intake.join("queue.json")
+    }
+    pub fn config_json(&self) -> PathBuf {
+        self.config.join("app-config.json")
+    }
+    pub fn event_log_jsonl(&self) -> PathBuf {
+        self.logs.join("masterd-events.jsonl")
+    }
 
     pub fn append_json_log(&self, value: &serde_json::Value) -> std::io::Result<()> {
         let path = self.event_log_jsonl();
@@ -177,22 +258,32 @@ impl AppDirs {
         }
 
         use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
         serde_json::to_writer(&mut file, value)?;
         file.write_all(b"\n")?;
+        file.sync_all()?;
         Ok(())
     }
 }
 
 /// Shared application state injected into every Tauri command via `tauri::State`.
 pub struct AppState {
-    pub chat_engine:  Arc<ChatEngine>,
-    pub sessions:     SessionMap,
+    pub chat_engine: Arc<ChatEngine>,
+    pub sessions: SessionMap,
     pub watch_folders: Arc<Mutex<Vec<WatchFolderEntry>>>,
-    pub intake_queue:  Arc<Mutex<Vec<IntakeQueueItem>>>,
+    pub intake_queue: Arc<Mutex<Vec<IntakeQueueItem>>>,
     /// User-configurable settings, hot-reloadable at runtime.
     pub config: Arc<Mutex<AppConfig>>,
     /// Resolved at startup; None in unit-test contexts.
@@ -217,20 +308,17 @@ impl Clone for AppState {
     }
 }
 
-unsafe impl Send for AppState {}
-unsafe impl Sync for AppState {}
-
 impl AppState {
     pub fn new() -> Self {
         let config = ChatEngineConfig::default();
         Self {
-            chat_engine:   Arc::new(ChatEngine::new(config)),
-            sessions:      Arc::new(Mutex::new(HashMap::new())),
+            chat_engine: Arc::new(ChatEngine::new(config)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
             watch_folders: Arc::new(Mutex::new(Vec::new())),
-            intake_queue:  Arc::new(Mutex::new(Vec::new())),
-            config:        Arc::new(Mutex::new(AppConfig::default())),
-            dirs:          std::sync::Mutex::new(None),
-            data_store:    std::sync::Mutex::new(None),
+            intake_queue: Arc::new(Mutex::new(Vec::new())),
+            config: Arc::new(Mutex::new(AppConfig::default())),
+            dirs: std::sync::Mutex::new(None),
+            data_store: std::sync::Mutex::new(None),
         }
     }
 
@@ -280,13 +368,14 @@ impl AppState {
                 );
                 let backfill_store = store.clone();
                 *self.data_store.lock().unwrap() = Some(store);
-                std::thread::spawn(move || match backfill_store.backfill_model2vec_embeddings(128)
-                {
-                    Ok(count) if count > 0 => {
-                        tracing::info!("Backfilled {count} model2vec embeddings")
+                std::thread::spawn(move || {
+                    match backfill_store.backfill_model2vec_embeddings(128) {
+                        Ok(count) if count > 0 => {
+                            tracing::info!("Backfilled {count} model2vec embeddings")
+                        }
+                        Ok(_) => tracing::info!("model2vec embeddings already up to date"),
+                        Err(err) => tracing::warn!("model2vec backfill failed: {err}"),
                     }
-                    Ok(_) => tracing::info!("model2vec embeddings already up to date"),
-                    Err(err) => tracing::warn!("model2vec backfill failed: {err}"),
                 });
             }
             Ok(Err(err)) => {
@@ -302,15 +391,18 @@ impl AppState {
 
     /// Persist watch folders and index snapshot to disk.
     pub async fn persist(&self) {
-        let dirs_guard = self.dirs.lock().unwrap();
-        let Some(dirs) = dirs_guard.as_ref() else { return };
-        let dirs = Arc::clone(dirs);
-        drop(dirs_guard);
+        let dirs = {
+            let dirs_guard = self.dirs.lock().unwrap();
+            let Some(dirs) = dirs_guard.as_ref() else {
+                return;
+            };
+            Arc::clone(dirs)
+        };
 
         // Save user config
         let cfg = self.config.lock().await.clone();
         if let Ok(json) = serde_json::to_string_pretty(&cfg) {
-            if let Err(e) = std::fs::write(dirs.config_json(), json) {
+            if let Err(e) = write_atomic(&dirs.config_json(), json.as_bytes()) {
                 tracing::error!("Failed to save app config: {e}");
             }
         }
@@ -318,14 +410,14 @@ impl AppState {
         // Save watch folders
         let folders = self.watch_folders.lock().await.clone();
         if let Ok(json) = serde_json::to_string_pretty(&folders) {
-            if let Err(e) = std::fs::write(dirs.watchers_json(), json) {
+            if let Err(e) = write_atomic(&dirs.watchers_json(), json.as_bytes()) {
                 tracing::error!("Failed to save watch folders: {e}");
             }
         }
 
         let intake_queue = self.intake_queue.lock().await.clone();
         if let Ok(json) = serde_json::to_string_pretty(&intake_queue) {
-            if let Err(e) = std::fs::write(dirs.intake_queue_json(), json) {
+            if let Err(e) = write_atomic(&dirs.intake_queue_json(), json.as_bytes()) {
                 tracing::error!("Failed to save intake queue: {e}");
             }
         }
@@ -333,7 +425,7 @@ impl AppState {
         // Save BM25 index snapshot
         let snapshot = self.chat_engine.snapshot_index().await;
         if let Ok(json) = snapshot.to_json() {
-            if let Err(e) = std::fs::write(dirs.index_snapshot_json(), json) {
+            if let Err(e) = write_atomic(&dirs.index_snapshot_json(), json.as_bytes()) {
                 tracing::error!("Failed to save index snapshot: {e}");
             }
         }

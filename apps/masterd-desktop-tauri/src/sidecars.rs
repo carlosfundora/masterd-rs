@@ -11,19 +11,25 @@
 //!   <resource_dir>/bin/falkordb-server
 //!   <resource_dir>/modules/falkordb.so
 //!   <resource_dir>/services/searxng-service/.venv/bin/python
-//!   <workspace_root>/services/model2vec-service/start.sh
+//!   <resource_dir>/services/colbert-service/.venv/bin/python
+//!   <resource_dir>/services/jina-service/.venv/bin/python
+//!   <resource_dir>/services/model2vec-service/start.sh
 //!
 //! Data directories are provisioned inside the app's data_dir:
 //!   <data_dir>/meilisearch/
 //!   <data_dir>/valkey/
 //!   <data_dir>/falkordb/
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use tracing::{info, warn};
+
+const RELEASE_REQUIRES_ASSETS: bool = !cfg!(debug_assertions);
 
 #[derive(Debug)]
 struct ManagedProcess {
@@ -47,11 +53,13 @@ pub struct SidecarSupervisor {
     procs: Arc<Mutex<Vec<ManagedProcess>>>,
 }
 
+#[cfg(debug_assertions)]
 fn find_workspace_root() -> Option<PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
         let services = dir.join("services");
-        if services.join("colbert-service").exists() || services.join("model2vec-service").exists() {
+        if services.join("colbert-service").exists() || services.join("model2vec-service").exists()
+        {
             return Some(dir);
         }
         if let Some(parent) = dir.parent() {
@@ -63,6 +71,55 @@ fn find_workspace_root() -> Option<PathBuf> {
     None
 }
 
+fn resource_asset(
+    resource_dir: &Path,
+    relative: impl AsRef<Path>,
+    required: bool,
+) -> Result<Option<PathBuf>> {
+    trusted_asset(resource_dir, &resource_dir.join(relative), required)
+}
+
+fn trusted_asset(root: &Path, path: &Path, required: bool) -> Result<Option<PathBuf>> {
+    if !path.exists() {
+        if required {
+            anyhow::bail!("required sidecar asset is missing: {}", path.display());
+        }
+        warn!("sidecar asset not found at {}, skipping", path.display());
+        return Ok(None);
+    }
+
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("canonicalize sidecar root {}", root.display()))?;
+    let canonical_path = path
+        .canonicalize()
+        .with_context(|| format!("canonicalize sidecar asset {}", path.display()))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        anyhow::bail!(
+            "sidecar asset {} resolves outside trusted root {}",
+            canonical_path.display(),
+            canonical_root.display()
+        );
+    }
+
+    #[cfg(unix)]
+    {
+        let mut current = Some(canonical_path.as_path());
+        while let Some(path) = current {
+            let mode = std::fs::metadata(path)?.permissions().mode();
+            if mode & 0o002 != 0 {
+                anyhow::bail!("sidecar asset path is world-writable: {}", path.display());
+            }
+            if path == canonical_root {
+                break;
+            }
+            current = path.parent();
+        }
+    }
+
+    Ok(Some(canonical_path))
+}
+
 impl SidecarSupervisor {
     pub fn new() -> Self {
         Self::default()
@@ -70,44 +127,72 @@ impl SidecarSupervisor {
 
     /// Start all bundled sidecars. Safe to call multiple times — already-running
     /// sidecars are skipped. Call from the Tauri `.setup()` hook.
-    pub fn start_all(&self, resource_dir: &Path, data_dir: &Path) {
-        self.start_meilisearch(resource_dir, data_dir);
-        self.start_valkey(resource_dir, data_dir);
-        self.start_falkordb(resource_dir, data_dir);
-        self.start_searxng(resource_dir);
-        self.start_embedding_services(resource_dir);
+    pub fn start_all(&self, resource_dir: &Path, data_dir: &Path) -> Result<()> {
+        self.start_meilisearch(resource_dir, data_dir)?;
+        self.start_valkey(resource_dir, data_dir)?;
+        self.start_falkordb(resource_dir, data_dir)?;
+        self.start_searxng(resource_dir)?;
+        self.start_embedding_services(resource_dir)?;
+        Ok(())
     }
 
-    fn start_embedding_services(&self, resource_dir: &Path) {
-        if let Some(root) = find_workspace_root() {
-            info!("found workspace root at {}, starting embedding services...", root.display());
-            self.start_python_service("colbert-service", &root, 11450);
-            self.start_python_service("jina-service", &root, 11447);
-            self.start_model2vec_service(resource_dir, &root);
-        } else {
-            warn!("could not locate workspace root, embedding services will not be started automatically");
-        }
+    fn start_embedding_services(&self, resource_dir: &Path) -> Result<()> {
+        let services_dir = resource_dir.join("services");
+        self.start_python_service(
+            "colbert-service",
+            &services_dir.join("colbert-service"),
+            11450,
+            resource_dir,
+        )?;
+        self.start_python_service(
+            "jina-service",
+            &services_dir.join("jina-service"),
+            11447,
+            resource_dir,
+        )?;
+        self.start_model2vec_service(resource_dir)?;
+        Ok(())
     }
 
-    fn start_python_service(&self, name: &'static str, root: &Path, port: u16) {
+    fn start_python_service(
+        &self,
+        name: &'static str,
+        service_dir: &Path,
+        port: u16,
+        trust_root: &Path,
+    ) -> Result<()> {
         let procs = self.procs.lock().unwrap();
         if procs.iter().any(|p| p.name == name) {
-            return;
+            return Ok(());
         }
         drop(procs);
 
-        let service_dir = root.join("services").join(name);
-        let bin = service_dir.join(".venv").join("bin").join("python");
-        let script = service_dir.join("server.py");
-
-        if !bin.exists() {
-            warn!("python binary not found at {}, skipping {name}", bin.display());
-            return;
-        }
-        if !script.exists() {
-            warn!("server script not found at {}, skipping {name}", script.display());
-            return;
-        }
+        let Some(bin) = trusted_asset(
+            trust_root,
+            &service_dir.join(".venv").join("bin").join("python"),
+            RELEASE_REQUIRES_ASSETS,
+        )?
+        else {
+            #[cfg(debug_assertions)]
+            if let Some(root) = find_workspace_root() {
+                let workspace_service = root.join("services").join(name);
+                return self.start_python_service(name, &workspace_service, port, &root);
+            }
+            return Ok(());
+        };
+        let Some(script) = trusted_asset(
+            trust_root,
+            &service_dir.join("server.py"),
+            RELEASE_REQUIRES_ASSETS,
+        )?
+        else {
+            #[cfg(debug_assertions)]
+            if let Some(root) = find_workspace_root() {
+                let workspace_service = root.join("services").join(name);
+                return self.start_python_service(name, &workspace_service, port, &root);
+            }
+            return Ok(());
+        };
 
         let child = Command::new(&bin)
             .arg(&script)
@@ -118,34 +203,55 @@ impl SidecarSupervisor {
         match child {
             Ok(c) => {
                 info!("{name} started on port {port}");
-                self.procs.lock().unwrap().push(ManagedProcess { name, child: c });
+                self.procs
+                    .lock()
+                    .unwrap()
+                    .push(ManagedProcess { name, child: c });
             }
             Err(e) => {
+                if RELEASE_REQUIRES_ASSETS {
+                    anyhow::bail!("failed to start {name}: {e}");
+                }
                 warn!("failed to start {name}: {e}");
             }
         }
+        Ok(())
     }
 
-    fn start_model2vec_service(&self, resource_dir: &Path, root: &Path) {
+    fn start_model2vec_service(&self, resource_dir: &Path) -> Result<()> {
         let procs = self.procs.lock().unwrap();
         if procs.iter().any(|p| p.name == "model2vec-service") {
-            return;
+            return Ok(());
         }
         drop(procs);
 
-        let packaged = resource_dir.join("services").join("model2vec-service");
-        let workspace = root.join("services").join("model2vec-service");
-        let service_dir = if packaged.join("start.sh").exists() {
-            packaged
-        } else if workspace.join("start.sh").exists() {
-            workspace
-        } else {
-            info!("model2vec-service not found in resources or workspace, skipping");
-            return;
+        let service_dir = resource_dir.join("services").join("model2vec-service");
+        let script = match trusted_asset(
+            resource_dir,
+            &service_dir.join("start.sh"),
+            RELEASE_REQUIRES_ASSETS,
+        )? {
+            Some(script) => script,
+            None => {
+                #[cfg(debug_assertions)]
+                if let Some(root) = find_workspace_root() {
+                    let workspace_service = root.join("services").join("model2vec-service");
+                    if let Some(script) =
+                        trusted_asset(&root, &workspace_service.join("start.sh"), false)?
+                    {
+                        script
+                    } else {
+                        return Ok(());
+                    }
+                } else {
+                    return Ok(());
+                }
+                #[cfg(not(debug_assertions))]
+                return Ok(());
+            }
         };
 
-        let script = service_dir.join("start.sh");
-        let child = Command::new("bash")
+        let child = Command::new("/usr/bin/bash")
             .arg(&script)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -154,43 +260,60 @@ impl SidecarSupervisor {
         match child {
             Ok(c) => {
                 info!("model2vec-service started on 127.0.0.1:11448");
-                self.procs.lock().unwrap().push(ManagedProcess { name: "model2vec-service", child: c });
+                self.procs.lock().unwrap().push(ManagedProcess {
+                    name: "model2vec-service",
+                    child: c,
+                });
             }
             Err(e) => {
+                if RELEASE_REQUIRES_ASSETS {
+                    anyhow::bail!("failed to start model2vec-service: {e}");
+                }
                 warn!("failed to start model2vec-service: {e}");
             }
         }
+        Ok(())
     }
 
-    fn start_searxng(&self, resource_dir: &Path) {
+    fn start_searxng(&self, resource_dir: &Path) -> Result<()> {
         let procs = self.procs.lock().unwrap();
         if procs.iter().any(|p| p.name == "searxng-service") {
-            return;
+            return Ok(());
         }
         drop(procs);
 
-        let packaged = resource_dir.join("services").join("searxng-service");
-        let workspace = find_workspace_root().map(|root| root.join("services").join("searxng-service"));
-        let service_dir = if packaged.join("start.py").exists() {
-            packaged
-        } else if let Some(workspace) = workspace {
-            workspace
-        } else {
-            info!("searxng-service not found in resources or workspace, skipping");
-            return;
-        };
-
+        let service_dir = resource_dir.join("services").join("searxng-service");
         let bin = service_dir.join(".venv").join("bin").join("python");
         let script = service_dir.join("start.py");
         let settings = service_dir.join("settings.yml");
-        if !bin.exists() {
-            warn!("SearXNG python binary not found at {}, skipping web search sidecar", bin.display());
-            return;
-        }
-        if !script.exists() {
-            warn!("SearXNG launcher not found at {}, skipping web search sidecar", script.display());
-            return;
-        }
+        let (bin, script, settings) = match (
+            trusted_asset(resource_dir, &bin, RELEASE_REQUIRES_ASSETS)?,
+            trusted_asset(resource_dir, &script, RELEASE_REQUIRES_ASSETS)?,
+            trusted_asset(resource_dir, &settings, RELEASE_REQUIRES_ASSETS)?,
+        ) {
+            (Some(bin), Some(script), Some(settings)) => (bin, script, settings),
+            _ => {
+                #[cfg(debug_assertions)]
+                if let Some(root) = find_workspace_root() {
+                    let workspace_service = root.join("services").join("searxng-service");
+                    let bin = workspace_service.join(".venv").join("bin").join("python");
+                    let script = workspace_service.join("start.py");
+                    let settings = workspace_service.join("settings.yml");
+                    match (
+                        trusted_asset(&root, &bin, false)?,
+                        trusted_asset(&root, &script, false)?,
+                        trusted_asset(&root, &settings, false)?,
+                    ) {
+                        (Some(bin), Some(script), Some(settings)) => (bin, script, settings),
+                        _ => return Ok(()),
+                    }
+                } else {
+                    return Ok(());
+                }
+                #[cfg(not(debug_assertions))]
+                return Ok(());
+            }
+        };
 
         let child = Command::new(&bin)
             .arg(&script)
@@ -202,94 +325,104 @@ impl SidecarSupervisor {
         match child {
             Ok(c) => {
                 info!("searxng-service started on 127.0.0.1:9265");
-                self.procs.lock().unwrap().push(ManagedProcess { name: "searxng-service", child: c });
+                self.procs.lock().unwrap().push(ManagedProcess {
+                    name: "searxng-service",
+                    child: c,
+                });
             }
             Err(e) => {
+                if RELEASE_REQUIRES_ASSETS {
+                    anyhow::bail!("failed to start searxng-service: {e}");
+                }
                 warn!("failed to start searxng-service: {e}");
             }
         }
+        Ok(())
     }
 
-    fn start_meilisearch(&self, resource_dir: &Path, data_dir: &Path) {
-        let bin = resource_dir.join("bin").join("meilisearch");
-        if !bin.exists() {
-            info!("meilisearch binary not found at {}, skipping", bin.display());
-            return;
-        }
+    fn start_meilisearch(&self, resource_dir: &Path, data_dir: &Path) -> Result<()> {
+        let Some(bin) = resource_asset(resource_dir, "bin/meilisearch", RELEASE_REQUIRES_ASSETS)?
+        else {
+            return Ok(());
+        };
 
         let db_path = data_dir.join("meilisearch");
-        if let Err(e) = std::fs::create_dir_all(&db_path) {
-            warn!("could not create meilisearch data dir: {e}");
-            return;
-        }
+        std::fs::create_dir_all(&db_path)
+            .with_context(|| format!("create meilisearch data dir {}", db_path.display()))?;
 
-        match self.spawn("meilisearch", &bin, &[
-            "--db-path", &db_path.to_string_lossy(),
-            "--no-analytics",
-            "--http-addr", "127.0.0.1:7700",
-        ]) {
-            Ok(()) => info!("meilisearch started on 127.0.0.1:7700"),
-            Err(e) => warn!("failed to start meilisearch: {e}"),
-        }
+        self.spawn(
+            "meilisearch",
+            &bin,
+            &[
+                "--db-path",
+                &db_path.to_string_lossy(),
+                "--no-analytics",
+                "--http-addr",
+                "127.0.0.1:7700",
+            ],
+        )
+        .context("failed to start meilisearch")?;
+        info!("meilisearch started on 127.0.0.1:7700");
+        Ok(())
     }
 
-    fn start_valkey(&self, resource_dir: &Path, data_dir: &Path) {
-        let bin = resource_dir.join("bin").join("valkey-server");
-        if !bin.exists() {
-            info!("valkey-server binary not found at {}, skipping", bin.display());
-            return;
-        }
+    fn start_valkey(&self, resource_dir: &Path, data_dir: &Path) -> Result<()> {
+        let Some(bin) = resource_asset(resource_dir, "bin/valkey-server", RELEASE_REQUIRES_ASSETS)?
+        else {
+            return Ok(());
+        };
 
         let db_path = data_dir.join("valkey");
-        if let Err(e) = std::fs::create_dir_all(&db_path) {
-            warn!("could not create valkey data dir: {e}");
-            return;
-        }
+        std::fs::create_dir_all(&db_path)
+            .with_context(|| format!("create valkey data dir {}", db_path.display()))?;
 
         let args: Vec<String> = vec![
-            "--port".into(), "6399".into(),
-            "--dir".into(), db_path.to_string_lossy().into_owned(),
-            "--save".into(), "60 1".into(),
+            "--port".into(),
+            "6399".into(),
+            "--dir".into(),
+            db_path.to_string_lossy().into_owned(),
+            "--save".into(),
+            "60 1".into(),
         ];
 
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        match self.spawn("valkey-server", &bin, &arg_refs) {
-            Ok(()) => info!("valkey-server started on 127.0.0.1:6399"),
-            Err(e) => warn!("failed to start valkey-server: {e}"),
-        }
+        self.spawn("valkey-server", &bin, &arg_refs)
+            .context("failed to start valkey-server")?;
+        info!("valkey-server started on 127.0.0.1:6399");
+        Ok(())
     }
 
-    fn start_falkordb(&self, resource_dir: &Path, data_dir: &Path) {
-        let bin = resource_dir.join("bin").join("falkordb-server");
-        if !bin.exists() {
-            info!("falkordb-server binary not found at {}, skipping", bin.display());
-            return;
-        }
-
-        let module_path = resource_dir.join("modules").join("falkordb.so");
-        let module_path = module_path.canonicalize().unwrap_or(module_path);
-        if !module_path.exists() {
-            warn!("falkordb module not found at {}, skipping graph DB", module_path.display());
-            return;
-        }
+    fn start_falkordb(&self, resource_dir: &Path, data_dir: &Path) -> Result<()> {
+        let Some(bin) =
+            resource_asset(resource_dir, "bin/falkordb-server", RELEASE_REQUIRES_ASSETS)?
+        else {
+            return Ok(());
+        };
+        let Some(module_path) =
+            resource_asset(resource_dir, "modules/falkordb.so", RELEASE_REQUIRES_ASSETS)?
+        else {
+            return Ok(());
+        };
 
         let db_path = data_dir.join("falkordb");
-        if let Err(e) = std::fs::create_dir_all(&db_path) {
-            warn!("could not create falkordb data dir: {e}");
-            return;
-        }
+        std::fs::create_dir_all(&db_path)
+            .with_context(|| format!("create falkordb data dir {}", db_path.display()))?;
 
         let args: Vec<String> = vec![
-            "--port".into(), "6380".into(),
-            "--dir".into(), db_path.to_string_lossy().into_owned(),
-            "--save".into(), "60 1".into(),
-            "--loadmodule".into(), module_path.to_string_lossy().into_owned(),
+            "--port".into(),
+            "6380".into(),
+            "--dir".into(),
+            db_path.to_string_lossy().into_owned(),
+            "--save".into(),
+            "60 1".into(),
+            "--loadmodule".into(),
+            module_path.to_string_lossy().into_owned(),
         ];
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        match self.spawn("falkordb-server", &bin, &arg_refs) {
-            Ok(()) => info!("falkordb-server started on 127.0.0.1:6380"),
-            Err(e) => warn!("failed to start falkordb-server: {e}"),
-        }
+        self.spawn("falkordb-server", &bin, &arg_refs)
+            .context("failed to start falkordb-server")?;
+        info!("falkordb-server started on 127.0.0.1:6380");
+        Ok(())
     }
 
     fn spawn(&self, name: &'static str, bin: &PathBuf, args: &[&str]) -> Result<()> {
@@ -300,7 +433,10 @@ impl SidecarSupervisor {
             .spawn()
             .with_context(|| format!("spawn {name}"))?;
 
-        self.procs.lock().unwrap().push(ManagedProcess { name, child });
+        self.procs
+            .lock()
+            .unwrap()
+            .push(ManagedProcess { name, child });
         Ok(())
     }
 

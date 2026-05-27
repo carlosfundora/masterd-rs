@@ -34,6 +34,8 @@ pub use telemetry::{
     FailureClass, PipelineTelemetryReport, StageDuration, StageFailureEvent, StageTimer,
 };
 
+const MAX_FILE_HOT_CACHE_BYTES: u64 = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileRecord {
     pub path: PathBuf,
@@ -404,17 +406,36 @@ impl HotCacheStore for FileHotCacheStore {
         if let Some(parent) = self.cache_log.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.cache_log)?;
+        if fs::metadata(&self.cache_log)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0)
+            >= MAX_FILE_HOT_CACHE_BYTES
+        {
+            let rotated = self.cache_log.with_extension("jsonl.1");
+            let _ = fs::remove_file(&rotated);
+            fs::rename(&self.cache_log, rotated)?;
+        }
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&self.cache_log)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
         let row = json!({
             "ts": Utc::now().to_rfc3339(),
             "path": record.path,
             "content_hash": record.content_hash,
-            "mode": "offline_hot_cache_fallback"
+            "mode": "offline_hot_cache"
         });
         writeln!(file, "{}", serde_json::to_string(&row)?)?;
+        file.sync_all()?;
         Ok(())
     }
 }
@@ -681,4 +702,51 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hasher.update(bytes);
     let digest = hasher.finalize();
     format!("{digest:x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        std::env::current_dir()
+            .expect("cwd")
+            .join("target")
+            .join("test-artifacts")
+            .join("masterd-pipeline")
+            .join(format!("{name}-{nonce}"))
+    }
+
+    #[test]
+    fn file_hot_cache_rotates_and_syncs_append() {
+        let dir = test_dir("hot-cache-rotation");
+        fs::create_dir_all(&dir).expect("create test dir");
+        let cache_log = dir.join("offline_hot_cache.jsonl");
+        let oversized = fs::File::create(&cache_log).expect("create oversized cache");
+        oversized
+            .set_len(MAX_FILE_HOT_CACHE_BYTES + 1)
+            .expect("make cache oversized");
+
+        let store = FileHotCacheStore::new(&cache_log);
+        store
+            .put_hot_path(&FileRecord {
+                path: PathBuf::from("/tmp/example.txt"),
+                content_hash: "abc123".to_string(),
+            })
+            .expect("append hot-cache row");
+
+        assert!(
+            cache_log.with_extension("jsonl.1").exists(),
+            "old cache should be rotated"
+        );
+        let raw = fs::read_to_string(&cache_log).expect("read new cache log");
+        assert!(raw.contains("/tmp/example.txt"));
+        assert!(raw.contains("abc123"));
+        fs::remove_dir_all(&dir).expect("cleanup test dir");
+    }
 }

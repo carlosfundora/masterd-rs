@@ -27,7 +27,7 @@ struct Args {
     pipeline_config: PathBuf,
     #[arg(long, default_value = "redis://127.0.0.1:6379/")]
     valkey_url: String,
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = false)]
     allow_offline_hot_cache: bool,
     #[arg(long, default_value_t = true)]
     verify_engine: bool,
@@ -74,6 +74,7 @@ struct AtomicHashIndexService {
     index_path: PathBuf,
     lock_path: PathBuf,
     lock_timeout: Duration,
+    stale_lock_timeout: Duration,
     lock_retry_interval: Duration,
 }
 
@@ -85,6 +86,7 @@ impl AtomicHashIndexService {
             index_path,
             lock_path,
             lock_timeout: Duration::from_secs(10),
+            stale_lock_timeout: Duration::from_secs(300),
             lock_retry_interval: Duration::from_millis(25),
         }
     }
@@ -120,15 +122,18 @@ impl AtomicHashIndexService {
             })?;
         }
         let start = SystemTime::now();
-        let mut attempt = 0;
+        let mut attempt = 0u32;
         loop {
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&self.lock_path)
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
             {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            match options.open(&self.lock_path) {
                 Ok(mut file) => {
-                    writeln!(file, "pid={}", std::process::id()).ok();
+                    writeln!(file, "pid={}", std::process::id())?;
                     writeln!(
                         file,
                         "acquired_unix_ms={}",
@@ -136,8 +141,8 @@ impl AtomicHashIndexService {
                             .duration_since(UNIX_EPOCH)
                             .map(|d| d.as_millis())
                             .unwrap_or(0)
-                    )
-                    .ok();
+                    )?;
+                    file.sync_all()?;
                     return Ok(HashIndexLockGuard {
                         lock_path: self.lock_path.clone(),
                     });
@@ -145,16 +150,9 @@ impl AtomicHashIndexService {
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                     let waited = start.elapsed().unwrap_or_default();
                     if waited >= self.lock_timeout {
-                        // Attempt to clean up stale lock
-                        if let Ok(metadata) = std::fs::metadata(&self.lock_path) {
-                            if let Ok(modified) = metadata.modified() {
-                                if let Ok(stale_duration) = SystemTime::now().duration_since(modified) {
-                                    if stale_duration > self.lock_timeout {
-                                        let _ = std::fs::remove_file(&self.lock_path);
-                                        continue;
-                                    }
-                                }
-                            }
+                        if self.lock_is_stale()? {
+                            let _ = std::fs::remove_file(&self.lock_path);
+                            continue;
                         }
                         return Err(anyhow::anyhow!(
                             "timed out waiting for hash-index lock {} after {:?}",
@@ -163,9 +161,10 @@ impl AtomicHashIndexService {
                         ));
                     }
                     let base_ms = self.lock_retry_interval.as_millis() as u64;
-                    let backoff = std::cmp::min(100, base_ms * (2_u64.pow(attempt)));
+                    let multiplier = 1_u64.checked_shl(attempt.min(5)).unwrap_or(32);
+                    let backoff = std::cmp::min(100, base_ms.saturating_mul(multiplier));
                     thread::sleep(Duration::from_millis(backoff));
-                    attempt += 1;
+                    attempt = attempt.saturating_add(1);
                 }
                 Err(err) => {
                     return Err(err).with_context(|| {
@@ -177,6 +176,25 @@ impl AtomicHashIndexService {
                 }
             }
         }
+    }
+
+    fn lock_is_stale(&self) -> Result<bool> {
+        let raw = fs::read_to_string(&self.lock_path).unwrap_or_default();
+        if let Some(pid) = raw.lines().find_map(|line| line.strip_prefix("pid=")) {
+            if process_is_alive(pid.trim()) {
+                return Ok(false);
+            }
+        }
+        let metadata = fs::metadata(&self.lock_path).with_context(|| {
+            format!("failed reading lock metadata {}", self.lock_path.display())
+        })?;
+        let modified = metadata
+            .modified()
+            .with_context(|| format!("failed reading lock mtime {}", self.lock_path.display()))?;
+        let age = SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or_default();
+        Ok(age > self.stale_lock_timeout)
     }
 
     fn read_index_state(&self) -> Result<HashIndexState> {
@@ -219,13 +237,16 @@ impl AtomicHashIndexService {
             nonce
         ));
         {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&tmp_path)
-                .with_context(|| {
-                    format!("failed opening temp hash-index {}", tmp_path.display())
-                })?;
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&tmp_path).with_context(|| {
+                format!("failed opening temp hash-index {}", tmp_path.display())
+            })?;
             file.write_all(&payload).with_context(|| {
                 format!("failed writing temp hash-index {}", tmp_path.display())
             })?;
@@ -250,6 +271,12 @@ impl AtomicHashIndexService {
         }
         Ok(())
     }
+}
+
+fn process_is_alive(pid: &str) -> bool {
+    !pid.is_empty()
+        && pid.chars().all(|ch| ch.is_ascii_digit())
+        && Path::new("/proc").join(pid).exists()
 }
 
 #[derive(Debug)]
@@ -322,7 +349,7 @@ fn main() -> Result<()> {
         match ValkeyHotCacheStore::new(&args.valkey_url, "masterd:hot", 86_400) {
             Ok(cache) => Box::new(cache),
             Err(err) if args.allow_offline_hot_cache => {
-                eprintln!("valkey unavailable, using offline hot-cache fallback: {err}");
+                eprintln!("valkey unavailable, using explicit file-backed hot-cache: {err}");
                 Box::new(FileHotCacheStore::new("data/offline_hot_cache.jsonl"))
             }
             Err(err) => return Err(err),
@@ -546,6 +573,65 @@ mod tests {
                 "hash-5".to_string()
             ]
         );
+        fs::remove_dir_all(&dir).expect("cleanup test dir");
+    }
+
+    #[test]
+    fn active_pid_lock_file_is_not_removed() {
+        let dir = test_dir("active-pid-lock");
+        fs::create_dir_all(&dir).expect("create test dir");
+        let index_path = dir.join("ingest_hash_index.json");
+        let mut service = AtomicHashIndexService::new(&index_path);
+        service.lock_timeout = Duration::from_millis(3);
+        service.lock_retry_interval = Duration::from_millis(1);
+        service.stale_lock_timeout = Duration::from_millis(0);
+        fs::write(
+            &service.lock_path,
+            format!("pid={}\nacquired_unix_ms=0\n", std::process::id()),
+        )
+        .expect("write active lock");
+
+        let err = service
+            .acquire_lock()
+            .expect_err("active lock should time out");
+        assert!(
+            err.to_string()
+                .contains("timed out waiting for hash-index lock"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            service.lock_path.exists(),
+            "active PID lock must not be removed"
+        );
+        fs::remove_dir_all(&dir).expect("cleanup test dir");
+    }
+
+    #[test]
+    fn stale_dead_pid_lock_file_is_recovered() {
+        let dir = test_dir("dead-pid-lock");
+        fs::create_dir_all(&dir).expect("create test dir");
+        let index_path = dir.join("ingest_hash_index.json");
+        let mut service = AtomicHashIndexService::new(&index_path);
+        service.lock_timeout = Duration::from_millis(3);
+        service.lock_retry_interval = Duration::from_millis(1);
+        service.stale_lock_timeout = Duration::from_millis(0);
+        fs::write(&service.lock_path, "pid=2147483647\nacquired_unix_ms=0\n")
+            .expect("write dead lock");
+        thread::sleep(Duration::from_millis(2));
+
+        assert_eq!(
+            service
+                .register_hash("hash-recovered")
+                .expect("register after stale lock"),
+            HashGateDecision::New
+        );
+        assert!(
+            !service.lock_path.exists(),
+            "lock should be released after recovery"
+        );
+        let raw = fs::read_to_string(&index_path).expect("read index");
+        let state: HashIndexState = serde_json::from_str(&raw).expect("parse index");
+        assert_eq!(state.hashes, vec!["hash-recovered".to_string()]);
         fs::remove_dir_all(&dir).expect("cleanup test dir");
     }
 }

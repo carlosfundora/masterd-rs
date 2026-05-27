@@ -4,6 +4,7 @@
 # ── Local model weights ──────────────────────────────────────────────────
 # Chat model GGUFs are too large for routine LFS; downloaded by installer.
 *.gguf
+models/.hf_cache/
 # ColBERT GGUF is tracked via Git LFS (see .gitattributes).
 !models/lfm2-colbert-350m/*.gguf
 
@@ -11,6 +12,7 @@
 apps/masterd-desktop-tauri/target/
 apps/masterd-ingest/target/
 apps/*/target/
+services/*/target/
 **/*.rs.bk
 Cargo.lock.bak
 

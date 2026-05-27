@@ -1,40 +1,71 @@
 // MASTERd desktop — Tauri v2 main entry point.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod state;
 mod sidecars;
+mod state;
 
-use state::AppState;
-use sidecars::SidecarSupervisor;
 use masterd_chat_engine::ChatToken;
 use masterd_data::{DataStore, PreferenceEvent, SearchMode as DataSearchMode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sidecars::SidecarSupervisor;
+use state::AppState;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use std::time::Duration;
 
 // ── ApiResult envelope ────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum ApiResult<T: Serialize> {
-    Ok { ok: bool, data: T, #[serde(rename = "requestId")] request_id: String, #[serde(rename = "receivedAt")] received_at: String },
-    Err { ok: bool, error: ApiError, #[serde(rename = "requestId")] request_id: String, #[serde(rename = "receivedAt")] received_at: String },
+    Ok {
+        ok: bool,
+        data: T,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "receivedAt")]
+        received_at: String,
+    },
+    Err {
+        ok: bool,
+        error: ApiError,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "receivedAt")]
+        received_at: String,
+    },
 }
 
-#[derive(Serialize)]
-pub struct ApiError { pub code: String, pub message: String, pub recoverable: bool }
+#[derive(Serialize, Debug)]
+pub struct ApiError {
+    pub code: String,
+    pub message: String,
+    pub recoverable: bool,
+}
 
 fn ok<T: Serialize>(data: T) -> ApiResult<T> {
-    ApiResult::Ok { ok: true, data, request_id: Uuid::new_v4().to_string(), received_at: now_ts() }
+    ApiResult::Ok {
+        ok: true,
+        data,
+        request_id: Uuid::new_v4().to_string(),
+        received_at: now_ts(),
+    }
 }
 
-fn err_result<T: Serialize>(code: impl Into<String>, message: impl Into<String>, recoverable: bool) -> ApiResult<T> {
+fn err_result<T: Serialize>(
+    code: impl Into<String>,
+    message: impl Into<String>,
+    recoverable: bool,
+) -> ApiResult<T> {
     ApiResult::Err {
         ok: false,
-        error: ApiError { code: code.into(), message: message.into(), recoverable },
+        error: ApiError {
+            code: code.into(),
+            message: message.into(),
+            recoverable,
+        },
         request_id: Uuid::new_v4().to_string(),
         received_at: now_ts(),
     }
@@ -42,6 +73,16 @@ fn err_result<T: Serialize>(code: impl Into<String>, message: impl Into<String>,
 
 fn data_store(state: &State<'_, AppState>) -> Option<DataStore> {
     state.data_store.lock().ok().and_then(|store| store.clone())
+}
+
+async fn run_blocking<T, F>(work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|err| err.to_string())?
 }
 
 fn now_ts() -> String {
@@ -53,8 +94,22 @@ fn now_ts() -> String {
 
 // ── Paginated ─────────────────────────────────────────────────────────────────
 #[derive(Serialize)]
-pub struct Paginated<T: Serialize> { pub items: Vec<T>, pub total: u64, pub limit: u64, pub offset: u64 }
-impl<T: Serialize> Paginated<T> { fn empty() -> Self { Self { items: vec![], total: 0, limit: 50, offset: 0 } } }
+pub struct Paginated<T: Serialize> {
+    pub items: Vec<T>,
+    pub total: u64,
+    pub limit: u64,
+    pub offset: u64,
+}
+impl<T: Serialize> Paginated<T> {
+    fn empty() -> Self {
+        Self {
+            items: vec![],
+            total: 0,
+            limit: 50,
+            offset: 0,
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct EmptyOk {}
@@ -198,15 +253,72 @@ pub struct AuditEntry {
 // ── System commands ────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
-pub struct SystemStatus { pub engine: String, pub database: String, pub watcher: String, pub models: Vec<ModelStatus>, pub queues: QueueCounts, pub storage: StorageSummary }
+pub struct SystemStatus {
+    pub engine: String,
+    pub database: String,
+    pub watcher: String,
+    pub models: Vec<ModelStatus>,
+    pub services: Vec<ServiceStatus>,
+    pub queues: QueueCounts,
+    pub storage: StorageSummary,
+}
 #[derive(Serialize)]
-pub struct ModelStatus { pub id: String, pub name: String, pub role: String, pub status: String }
+pub struct ModelStatus {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    pub status: String,
+}
+#[derive(Serialize, Clone)]
+pub struct ServiceStatus {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    pub status: String,
+    pub required: bool,
+    pub message: Option<String>,
+}
 #[derive(Serialize)]
-pub struct QueueCounts { pub pending: u32, pub processing: u32, pub review: u32, #[serde(rename = "completeToday")] pub complete_today: u32, pub errors: u32 }
+pub struct QueueCounts {
+    pub pending: u32,
+    pub processing: u32,
+    pub review: u32,
+    #[serde(rename = "completeToday")]
+    pub complete_today: u32,
+    pub errors: u32,
+}
 #[derive(Serialize)]
-pub struct StorageSummary { #[serde(rename = "indexedFiles")] pub indexed_files: u64, #[serde(rename = "totalBytes")] pub total_bytes: u64 }
+pub struct StorageSummary {
+    #[serde(rename = "indexedFiles")]
+    pub indexed_files: u64,
+    #[serde(rename = "totalBytes")]
+    pub total_bytes: u64,
+}
 #[derive(Serialize)]
-pub struct SystemHealth { #[serde(rename = "cpuUsage")] pub cpu_usage: f32, #[serde(rename = "memoryUsage")] pub memory_usage: f32, #[serde(rename = "diskFreeBytes")] pub disk_free_bytes: u64, #[serde(rename = "dbLatencyMs")] pub db_latency_ms: u32, #[serde(rename = "activeThreads")] pub active_threads: u32 }
+pub struct SystemHealth {
+    #[serde(rename = "cpuUsage")]
+    pub cpu_usage: f32,
+    #[serde(rename = "memoryUsage")]
+    pub memory_usage: f32,
+    #[serde(rename = "diskFreeBytes")]
+    pub disk_free_bytes: u64,
+    #[serde(rename = "dbLatencyMs")]
+    pub db_latency_ms: u32,
+    #[serde(rename = "activeThreads")]
+    pub active_threads: u32,
+}
+
+#[derive(Default)]
+struct DataStatusSnapshot {
+    indexed_files: usize,
+    total_bytes: u64,
+    pending: usize,
+    processing: usize,
+    review: usize,
+    complete_today: usize,
+    errors: usize,
+    services: Vec<ServiceStatus>,
+}
 
 #[tauri::command]
 async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<SystemStatus>, String> {
@@ -214,12 +326,39 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
     let loaded_models = state.chat_engine.loaded_models();
     let thinking_loaded = loaded_models.contains(&"lfm2.5-thinking-1.2b");
     let instruct_loaded = loaded_models.contains(&"lfm2.5-instruct-350m");
-    let (indexed_files, total_bytes) = data_store(&state)
-        .and_then(|store| store.document_summary().ok())
-        .unwrap_or((0, 0));
-    let (pending, processing, review, complete_today, errors) = data_store(&state)
-        .and_then(|store| store.pipeline_summary().ok())
-        .unwrap_or((0, 0, 0, 0, 0));
+    let store = data_store(&state);
+    let snapshot = run_blocking(move || {
+        let Some(store) = store else {
+            return Ok(DataStatusSnapshot {
+                services: missing_datastore_services(),
+                ..Default::default()
+            });
+        };
+        let (indexed_files, total_bytes) = store.document_summary().unwrap_or((0, 0));
+        let (pending, processing, review, complete_today, errors) =
+            store.pipeline_summary().unwrap_or((0, 0, 0, 0, 0));
+        let services = store
+            .required_service_statuses()
+            .into_iter()
+            .map(map_required_service_status)
+            .collect();
+        Ok(DataStatusSnapshot {
+            indexed_files,
+            total_bytes,
+            pending,
+            processing,
+            review,
+            complete_today,
+            errors,
+            services,
+        })
+    })
+    .await?;
+    let database_ready = snapshot
+        .services
+        .iter()
+        .filter(|service| service.required)
+        .all(|service| service.status == "ready");
 
     let colbert_url = config.colbert_url;
     let jina_url = config.jina_url;
@@ -231,23 +370,92 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
         check_service_health_async(&model2vec_url),
     );
     Ok(ok(SystemStatus {
-        engine: "online".to_string(), database: "connected".to_string(), watcher: "active".to_string(),
+        engine: if database_ready { "online" } else { "degraded" }.to_string(),
+        database: if database_ready { "ready" } else { "not_ready" }.to_string(),
+        watcher: "active".to_string(),
         models: vec![
-            ModelStatus { id: "lfm2.5-thinking".into(), name: "LFM2.5 1.2B Thinking".into(), role: "summarization".into(), status: if thinking_loaded { "online".into() } else { "offline".into() } },
-            ModelStatus { id: "lfm2.5-instruct".into(), name: "LFM2.5 350M Instruct".into(), role: "classification".into(), status: if instruct_loaded { "online".into() } else { "offline".into() } },
-            ModelStatus { id: "colbert-reranker".into(), name: "ColBERT 350M Reranker".into(), role: "reranking".into(), status: colbert_health },
-            ModelStatus { id: "jina-embedding".into(), name: "Jina v3 Embedding".into(), role: "embedding".into(), status: jina_health },
-            ModelStatus { id: "model2vec-fallback".into(), name: "model2vec-rs".into(), role: "embedding".into(), status: model2vec_health },
+            ModelStatus {
+                id: "lfm2.5-thinking".into(),
+                name: "LFM2.5 1.2B Thinking".into(),
+                role: "summarization".into(),
+                status: if thinking_loaded {
+                    "online".into()
+                } else {
+                    "offline".into()
+                },
+            },
+            ModelStatus {
+                id: "lfm2.5-instruct".into(),
+                name: "LFM2.5 350M Instruct".into(),
+                role: "classification".into(),
+                status: if instruct_loaded {
+                    "online".into()
+                } else {
+                    "offline".into()
+                },
+            },
+            ModelStatus {
+                id: "colbert-reranker".into(),
+                name: "ColBERT 350M Reranker".into(),
+                role: "reranking".into(),
+                status: colbert_health,
+            },
+            ModelStatus {
+                id: "jina-embedding".into(),
+                name: "Jina v3 Embedding".into(),
+                role: "embedding".into(),
+                status: jina_health,
+            },
+            ModelStatus {
+                id: "model2vec-service".into(),
+                name: "model2vec-rs".into(),
+                role: "embedding".into(),
+                status: model2vec_health,
+            },
         ],
+        services: snapshot.services,
         queues: QueueCounts {
-            pending: pending as u32,
-            processing: processing as u32,
-            review: review as u32,
-            complete_today: complete_today as u32,
-            errors: errors as u32,
+            pending: snapshot.pending as u32,
+            processing: snapshot.processing as u32,
+            review: snapshot.review as u32,
+            complete_today: snapshot.complete_today as u32,
+            errors: snapshot.errors as u32,
         },
-        storage: StorageSummary { indexed_files: indexed_files as u64, total_bytes },
+        storage: StorageSummary {
+            indexed_files: snapshot.indexed_files as u64,
+            total_bytes: snapshot.total_bytes,
+        },
     }))
+}
+
+fn map_required_service_status(status: masterd_data::RequiredServiceStatus) -> ServiceStatus {
+    ServiceStatus {
+        id: status.id,
+        name: status.name,
+        role: status.role,
+        status: status.status,
+        required: status.required,
+        message: status.message,
+    }
+}
+
+fn missing_datastore_services() -> Vec<ServiceStatus> {
+    [
+        ("sqlite", "SQLite", "canonical-store"),
+        ("meilisearch", "Meilisearch", "lexical-index"),
+        ("valkey", "Valkey", "hot-cache"),
+        ("falkordb", "FalkorDB", "graph-db"),
+    ]
+    .into_iter()
+    .map(|(id, name, role)| ServiceStatus {
+        id: id.to_string(),
+        name: name.to_string(),
+        role: role.to_string(),
+        status: "missing".to_string(),
+        required: true,
+        message: Some("canonical datastore is unavailable".to_string()),
+    })
+    .collect()
 }
 
 #[tauri::command]
@@ -263,17 +471,24 @@ async fn system_get_health() -> ApiResult<SystemHealth> {
 
 fn read_mem_pct() -> Option<f32> {
     let s = std::fs::read_to_string("/proc/meminfo").ok()?;
-    let mut total = 0u64; let mut avail = 0u64;
+    let mut total = 0u64;
+    let mut avail = 0u64;
     for line in s.lines() {
-        if line.starts_with("MemTotal:") { total = line.split_whitespace().nth(1)?.parse().ok()?; }
-        else if line.starts_with("MemAvailable:") { avail = line.split_whitespace().nth(1)?.parse().ok()?; }
+        if line.starts_with("MemTotal:") {
+            total = line.split_whitespace().nth(1)?.parse().ok()?;
+        } else if line.starts_with("MemAvailable:") {
+            avail = line.split_whitespace().nth(1)?.parse().ok()?;
+        }
     }
-    if total == 0 { return None; }
+    if total == 0 {
+        return None;
+    }
     Some((total - avail) as f32 / total as f32 * 100.0)
 }
 fn num_logical_cpus() -> u32 {
     std::fs::read_to_string("/proc/cpuinfo")
-        .map(|s| s.lines().filter(|l| l.starts_with("processor")).count() as u32).unwrap_or(1)
+        .map(|s| s.lines().filter(|l| l.starts_with("processor")).count() as u32)
+        .unwrap_or(1)
 }
 
 async fn check_service_health_async(url: &str) -> String {
@@ -309,9 +524,13 @@ async fn intake_add_files(
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
             .to_string();
-        let extension = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_string();
-        let size_bytes = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-        
+        let extension = p
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let size_bytes = tokio::fs::metadata(p).await.map(|m| m.len()).unwrap_or(0);
+
         if let Some(store) = store.clone() {
             let path_for_ingest = path.clone();
             let ocr_language = state.config.lock().await.ocr_language.clone();
@@ -327,12 +546,24 @@ async fn intake_add_files(
 
             let item = crate::state::IntakeQueueItem {
                 id: ingest_result.run.id.clone(),
-                file_name: ingest_result.document.as_ref().map(|d| d.current_name.clone()).unwrap_or(file_name),
+                file_name: ingest_result
+                    .document
+                    .as_ref()
+                    .map(|d| d.current_name.clone())
+                    .unwrap_or(file_name),
                 path: path.clone(),
                 extension: extension.clone(),
                 size_bytes,
-                status: if ingest_result.run.status == "error" { "error".into() } else { "complete".into() },
-                progress: if ingest_result.run.status == "error" { 0 } else { 100 },
+                status: if ingest_result.run.status == "error" {
+                    "error".into()
+                } else {
+                    "complete".into()
+                },
+                progress: if ingest_result.run.status == "error" {
+                    0
+                } else {
+                    100
+                },
                 duplicate_status: ingest_result.document.map(|d| d.duplicate_status),
                 created_at: ingest_result.run.created_at.clone(),
                 updated_at: ingest_result.run.updated_at.clone(),
@@ -356,31 +587,80 @@ async fn intake_add_files(
     }
 
     if !items.is_empty() {
-        state.intake_queue.lock().await.extend(items.clone());
+        let queue_snapshot = {
+            let mut queue = state.intake_queue.lock().await;
+            queue.extend(items.clone());
+            queue.clone()
+        };
+        if let Err(err) = persist_intake_queue_snapshot(&state, &queue_snapshot).await {
+            return Ok(err_result(
+                "WRITE_FAILED",
+                format!("Failed to save intake queue: {err}"),
+                true,
+            ));
+        }
     }
 
     Ok(ok(items))
 }
 
 #[tauri::command]
-async fn intake_retry_item(state: State<'_, AppState>, id: String) -> Result<ApiResult<crate::state::IntakeQueueItem>, String> {
-    let mut queue = state.intake_queue.lock().await;
-    if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
-        item.status = "queued".into();
-        item.progress = 0;
-        item.updated_at = now_ts();
+async fn intake_retry_item(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<crate::state::IntakeQueueItem>, String> {
+    let (item, queue_snapshot) = {
+        let mut queue = state.intake_queue.lock().await;
+        if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
+            item.status = "queued".into();
+            item.progress = 0;
+            item.updated_at = now_ts();
+            (Some(item.clone()), Some(queue.clone()))
+        } else {
+            (None, None)
+        }
+    };
+    if let Some(item) = item {
+        if let Some(snapshot) = queue_snapshot {
+            if let Err(err) = persist_intake_queue_snapshot(&state, &snapshot).await {
+                return Ok(err_result(
+                    "WRITE_FAILED",
+                    format!("Failed to save intake queue: {err}"),
+                    true,
+                ));
+            }
+        }
         return Ok(ok(item.clone()));
     }
     Ok(ok(empty_intake_item(id)))
 }
 
 #[tauri::command]
-async fn intake_cancel_item(state: State<'_, AppState>, id: String) -> Result<ApiResult<crate::state::IntakeQueueItem>, String> {
-    let mut queue = state.intake_queue.lock().await;
-    if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
-        item.status = "error".into();
-        item.progress = 0;
-        item.updated_at = now_ts();
+async fn intake_cancel_item(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<crate::state::IntakeQueueItem>, String> {
+    let (item, queue_snapshot) = {
+        let mut queue = state.intake_queue.lock().await;
+        if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
+            item.status = "error".into();
+            item.progress = 0;
+            item.updated_at = now_ts();
+            (Some(item.clone()), Some(queue.clone()))
+        } else {
+            (None, None)
+        }
+    };
+    if let Some(item) = item {
+        if let Some(snapshot) = queue_snapshot {
+            if let Err(err) = persist_intake_queue_snapshot(&state, &snapshot).await {
+                return Ok(err_result(
+                    "WRITE_FAILED",
+                    format!("Failed to save intake queue: {err}"),
+                    true,
+                ));
+            }
+        }
         return Ok(ok(item.clone()));
     }
     let mut item = empty_intake_item(id);
@@ -389,10 +669,34 @@ async fn intake_cancel_item(state: State<'_, AppState>, id: String) -> Result<Ap
     Ok(ok(item))
 }
 
+async fn persist_intake_queue_snapshot(
+    state: &State<'_, AppState>,
+    items: &[crate::state::IntakeQueueItem],
+) -> Result<(), String> {
+    let dirs = state.dirs.lock().ok().and_then(|guard| guard.clone());
+    let Some(dirs) = dirs else {
+        return Ok(());
+    };
+    let path = dirs.intake_queue_json();
+    let json = serde_json::to_vec_pretty(items).map_err(|err| err.to_string())?;
+    run_blocking(move || crate::state::write_atomic(&path, &json).map_err(|err| err.to_string()))
+        .await
+}
+
 #[tauri::command]
-async fn documents_get_by_id(state: State<'_, AppState>, id: String) -> Result<ApiResult<DocumentRecord>, String> {
+async fn documents_get_by_id(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<DocumentRecord>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(Some(doc)) = store.get_document(&id) {
+        let lookup_id = id.clone();
+        if let Some(doc) = run_blocking(move || {
+            store
+                .get_document(&lookup_id)
+                .map_err(|err| err.to_string())
+        })
+        .await?
+        {
             return Ok(ok(map_document(doc)));
         }
     }
@@ -400,9 +704,19 @@ async fn documents_get_by_id(state: State<'_, AppState>, id: String) -> Result<A
 }
 
 #[tauri::command]
-async fn documents_get_preview(state: State<'_, AppState>, id: String) -> Result<ApiResult<DocumentPreview>, String> {
+async fn documents_get_preview(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<DocumentPreview>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(Some(doc)) = store.get_document(&id) {
+        let lookup_id = id.clone();
+        if let Some(doc) = run_blocking(move || {
+            store
+                .get_document(&lookup_id)
+                .map_err(|err| err.to_string())
+        })
+        .await?
+        {
             let preview = doc
                 .extracted_text
                 .as_deref()
@@ -430,9 +744,19 @@ async fn documents_get_preview(state: State<'_, AppState>, id: String) -> Result
 }
 
 #[tauri::command]
-async fn documents_get_extracted_text(state: State<'_, AppState>, id: String) -> Result<ApiResult<ExtractedTextResult>, String> {
+async fn documents_get_extracted_text(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<ExtractedTextResult>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(Some(doc)) = store.get_document(&id) {
+        let lookup_id = id.clone();
+        if let Some(doc) = run_blocking(move || {
+            store
+                .get_document(&lookup_id)
+                .map_err(|err| err.to_string())
+        })
+        .await?
+        {
             let entities = doc
                 .tags
                 .iter()
@@ -455,9 +779,21 @@ async fn documents_get_extracted_text(state: State<'_, AppState>, id: String) ->
 }
 
 #[tauri::command]
-async fn documents_update_tags(state: State<'_, AppState>, id: String, tags: Vec<String>) -> Result<ApiResult<DocumentRecord>, String> {
+async fn documents_update_tags(
+    state: State<'_, AppState>,
+    id: String,
+    tags: Vec<String>,
+) -> Result<ApiResult<DocumentRecord>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(Some(doc)) = store.update_document_tags(&id, &tags) {
+        let lookup_id = id.clone();
+        let tags_for_update = tags.clone();
+        if let Some(doc) = run_blocking(move || {
+            store
+                .update_document_tags(&lookup_id, &tags_for_update)
+                .map_err(|err| err.to_string())
+        })
+        .await?
+        {
             return Ok(ok(map_document(doc)));
         }
     }
@@ -467,20 +803,35 @@ async fn documents_update_tags(state: State<'_, AppState>, id: String, tags: Vec
 }
 
 #[tauri::command]
-async fn documents_reprocess(state: State<'_, AppState>, id: String, #[allow(unused)] options: Option<serde_json::Value>) -> Result<ApiResult<PipelineJob>, String> {
+async fn documents_reprocess(
+    state: State<'_, AppState>,
+    id: String,
+    #[allow(unused)] options: Option<serde_json::Value>,
+) -> Result<ApiResult<PipelineJob>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(Some(doc)) = store.get_document(&id) {
-            let config = state.config.lock().await.clone();
-            let ingest_result = tokio::task::spawn_blocking(move || {
+        let lookup_id = id.clone();
+        let config = state.config.lock().await.clone();
+        if let Some(job) = run_blocking(move || {
+            let Some(doc) = store
+                .get_document(&lookup_id)
+                .map_err(|err| err.to_string())?
+            else {
+                return Ok(None);
+            };
+            let ingest_result = {
                 store.ingest_file(
                     std::path::Path::new(&doc.current_path),
-                    &masterd_data::IngestConfig { ocr_language: config.ocr_language },
+                    &masterd_data::IngestConfig {
+                        ocr_language: config.ocr_language,
+                    },
                 )
-            })
-            .await
-            .map_err(|err| err.to_string())?
+            }
             .map_err(|err| err.to_string())?;
-            return Ok(ok(map_pipeline_run(ingest_result.run)));
+            Ok(Some(map_pipeline_run(ingest_result.run)))
+        })
+        .await?
+        {
+            return Ok(ok(job));
         }
     }
     Ok(ok(empty_pipeline_job(id)))
@@ -572,10 +923,12 @@ fn map_document(doc: masterd_data::DocumentRecord) -> DocumentRecord {
         mime_type: doc.mime_type,
         size_bytes: doc.size_bytes,
         hash: doc.hash,
-        classification: doc.classification.map(|classification| ClassificationResult {
-            category: classification.category,
-            confidence: classification.confidence,
-        }),
+        classification: doc
+            .classification
+            .map(|classification| ClassificationResult {
+                category: classification.category,
+                confidence: classification.confidence,
+            }),
         tags: doc.tags,
         extracted_text: doc.extracted_text,
         summary: doc.summary,
@@ -608,20 +961,26 @@ fn map_pipeline_run(run: masterd_data::PipelineRun) -> PipelineJob {
         file_name,
         stage: stage_name,
         status: run.status.clone(),
-        progress: if run.status == "complete" || run.status == "duplicate" { 100 } else { 0 },
+        progress: if run.status == "complete" || run.status == "duplicate" {
+            100
+        } else {
+            0
+        },
         started_at: Some(run.created_at.clone()),
         finished_at: Some(run.updated_at.clone()),
         error_message: run.failure.as_ref().map(|failure| failure.message.clone()),
         worker_id: Some("local-data-store".into()),
         logs: stage_timings
             .iter()
-            .map(|stage| json!({
-                "id": format!("{}:{}", run_id, stage.stage),
-                "level": if stage.status == "complete" { "info" } else { "warning" },
-                "message": format!("{} {}", stage.stage, stage.status),
-                "createdAt": updated_at,
-                "details": { "elapsedMs": stage.elapsed_ms }
-            }))
+            .map(|stage| {
+                json!({
+                    "id": format!("{}:{}", run_id, stage.stage),
+                    "level": if stage.status == "complete" { "info" } else { "warning" },
+                    "message": format!("{} {}", stage.stage, stage.status),
+                    "createdAt": updated_at,
+                    "details": { "elapsedMs": stage.elapsed_ms }
+                })
+            })
             .collect(),
         stage_timings,
         retryable: run.retryable,
@@ -701,19 +1060,42 @@ async fn intake_add_watch_folder(
 
     // spawn_blocking for the file I/O + sync index calls
     let count = tokio::task::spawn_blocking(move || {
-        fn walk(dir: &Path, depth: usize, engine: &masterd_chat_engine::ChatEngine, count: &mut usize) {
-            let Ok(entries) = std::fs::read_dir(dir) else { return };
+        fn walk(
+            dir: &Path,
+            depth: usize,
+            engine: &masterd_chat_engine::ChatEngine,
+            count: &mut usize,
+        ) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_dir() && depth < 3 { walk(&p, depth + 1, engine, count); continue; }
-                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                if !matches!(ext.as_str(), "txt" | "md" | "rst" | "log") { continue; }
-                let Ok(text) = std::fs::read_to_string(&p) else { continue };
-                if text.trim().is_empty() { continue; }
+                if p.is_dir() && depth < 3 {
+                    walk(&p, depth + 1, engine, count);
+                    continue;
+                }
+                let ext = p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if !matches!(ext.as_str(), "txt" | "md" | "rst" | "log") {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&p) else {
+                    continue;
+                };
+                if text.trim().is_empty() {
+                    continue;
+                }
                 let doc_id = p.to_string_lossy().to_string();
                 let doc = IndexedDocument {
-                    doc_id: doc_id.clone(), text, path: Some(doc_id),
-                    symbols: vec![], doc_type: Some(ext),
+                    doc_id: doc_id.clone(),
+                    text,
+                    path: Some(doc_id),
+                    symbols: vec![],
+                    doc_type: Some(ext),
                 };
                 tokio::runtime::Handle::current().block_on(engine.index_document(doc));
                 *count += 1;
@@ -735,18 +1117,20 @@ async fn intake_add_watch_folder(
         created_at: now_ts(),
     };
 
-    state.watch_folders.lock().await.push(entry.clone());
+    let folders_snapshot = {
+        let mut folders = state.watch_folders.lock().await;
+        folders.push(entry.clone());
+        folders.clone()
+    };
 
-    // Persist immediately so watch folders survive crash
-    if let Ok(guard) = state.dirs.lock() {
-        if let Some(dirs) = guard.as_ref() {
-            let folders = state.watch_folders.try_lock().map(|g| g.clone()).ok();
-            if let Some(f) = folders {
-                if let Ok(json) = serde_json::to_string_pretty(&f) {
-                    let _ = std::fs::write(dirs.watchers_json(), json);
-                }
-            }
-        }
+    // Persist immediately so watch folders survive crash.
+    if let Err(err) = persist_watch_folders_snapshot(&state, &folders_snapshot).await {
+        tracing::error!("intake_add_watch_folder: write failed: {err}");
+        return Ok(err_result(
+            "WRITE_FAILED",
+            format!("Failed to save watch folders: {err}"),
+            true,
+        ));
     }
 
     Ok(ok(entry))
@@ -758,8 +1142,34 @@ async fn intake_remove_watch_folder(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<ApiResult<EmptyOk>, String> {
-    state.watch_folders.lock().await.retain(|f| f.id != id);
+    let folders_snapshot = {
+        let mut folders = state.watch_folders.lock().await;
+        folders.retain(|f| f.id != id);
+        folders.clone()
+    };
+    if let Err(err) = persist_watch_folders_snapshot(&state, &folders_snapshot).await {
+        tracing::error!("intake_remove_watch_folder: write failed: {err}");
+        return Ok(err_result(
+            "WRITE_FAILED",
+            format!("Failed to save watch folders: {err}"),
+            true,
+        ));
+    }
     Ok(ok(EmptyOk {}))
+}
+
+async fn persist_watch_folders_snapshot(
+    state: &State<'_, AppState>,
+    folders: &[crate::state::WatchFolderEntry],
+) -> Result<(), String> {
+    let dirs = state.dirs.lock().ok().and_then(|guard| guard.clone());
+    let Some(dirs) = dirs else {
+        return Ok(());
+    };
+    let path = dirs.watchers_json();
+    let json = serde_json::to_vec_pretty(folders).map_err(|err| err.to_string())?;
+    run_blocking(move || crate::state::write_atomic(&path, &json).map_err(|err| err.to_string()))
+        .await
 }
 
 /// List current intake queue items.
@@ -769,30 +1179,61 @@ async fn intake_list_queue(
 ) -> Result<ApiResult<Paginated<crate::state::IntakeQueueItem>>, String> {
     let items = state.intake_queue.lock().await.clone();
     let total = items.len() as u64;
-    Ok(ok(Paginated { items, total, limit: 50, offset: 0 }))
+    Ok(ok(Paginated {
+        items,
+        total,
+        limit: 50,
+        offset: 0,
+    }))
 }
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn actions_approve_rename(documentId: String, suggestedName: Option<String>) -> ApiResult<ActionResult> {
-    ok(empty_action(documentId, suggestedName.map(|n| format!("rename approved: {n}")).unwrap_or_else(|| "rename approved".into())))
+async fn actions_approve_rename(
+    documentId: String,
+    suggestedName: Option<String>,
+) -> ApiResult<ActionResult> {
+    ok(empty_action(
+        documentId,
+        suggestedName
+            .map(|n| format!("rename approved: {n}"))
+            .unwrap_or_else(|| "rename approved".into()),
+    ))
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn actions_reject_rename(documentId: String, reason: Option<String>) -> ApiResult<ActionResult> {
-    ok(empty_action(documentId, reason.unwrap_or_else(|| "rename rejected".into())))
+async fn actions_reject_rename(
+    documentId: String,
+    reason: Option<String>,
+) -> ApiResult<ActionResult> {
+    ok(empty_action(
+        documentId,
+        reason.unwrap_or_else(|| "rename rejected".into()),
+    ))
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn actions_approve_move(documentId: String, destinationPath: String) -> ApiResult<ActionResult> {
-    ok(empty_action(documentId, format!("move approved: {destinationPath}")))
+async fn actions_approve_move(
+    documentId: String,
+    destinationPath: String,
+) -> ApiResult<ActionResult> {
+    ok(empty_action(
+        documentId,
+        format!("move approved: {destinationPath}"),
+    ))
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn actions_mark_duplicate(documentId: String, duplicateOfId: String) -> ApiResult<ActionResult> {
-    ok(empty_action(documentId, format!("marked duplicate of {duplicateOfId}")))
+async fn actions_mark_duplicate(
+    documentId: String,
+    duplicateOfId: String,
+) -> ApiResult<ActionResult> {
+    ok(empty_action(
+        documentId,
+        format!("marked duplicate of {duplicateOfId}"),
+    ))
 }
 
 #[tauri::command]
@@ -802,21 +1243,43 @@ async fn actions_mark_unique(documentId: String) -> ApiResult<ActionResult> {
 }
 
 #[tauri::command]
-async fn pipeline_list_jobs(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> Result<ApiResult<Paginated<PipelineJob>>, String> {
+async fn pipeline_list_jobs(
+    state: State<'_, AppState>,
+    #[allow(unused)] params: Option<serde_json::Value>,
+) -> Result<ApiResult<Paginated<PipelineJob>>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(runs) = store.list_pipeline_runs(100, 0) {
-            let items = runs.into_iter().map(map_pipeline_run).collect::<Vec<_>>();
-            let total = items.len() as u64;
-            return Ok(ok(Paginated { items, total, limit: 100, offset: 0 }));
-        }
+        let runs = run_blocking(move || {
+            store
+                .list_pipeline_runs(100, 0)
+                .map_err(|err| err.to_string())
+        })
+        .await?;
+        let items = runs.into_iter().map(map_pipeline_run).collect::<Vec<_>>();
+        let total = items.len() as u64;
+        return Ok(ok(Paginated {
+            items,
+            total,
+            limit: 100,
+            offset: 0,
+        }));
     }
     Ok(ok(Paginated::empty()))
 }
 
 #[tauri::command]
-async fn pipeline_get_job(state: State<'_, AppState>, id: String) -> Result<ApiResult<PipelineJob>, String> {
+async fn pipeline_get_job(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<PipelineJob>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(Some(run)) = store.get_pipeline_run(&id) {
+        let lookup_id = id.clone();
+        if let Some(run) = run_blocking(move || {
+            store
+                .get_pipeline_run(&lookup_id)
+                .map_err(|err| err.to_string())
+        })
+        .await?
+        {
             return Ok(ok(map_pipeline_run(run)));
         }
     }
@@ -824,32 +1287,69 @@ async fn pipeline_get_job(state: State<'_, AppState>, id: String) -> Result<ApiR
 }
 
 #[tauri::command]
-async fn pipeline_retry_job(state: State<'_, AppState>, id: String) -> Result<ApiResult<PipelineJob>, String> {
+async fn pipeline_retry_job(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<PipelineJob>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(Some(run)) = store.get_pipeline_run(&id) {
-            let path = run.file_path.clone();
-            let ocr_language = state.config.lock().await.ocr_language.clone();
-            if let Ok(updated) = tokio::task::spawn_blocking(move || {
-                store.ingest_file(
+        let lookup_id = id.clone();
+        let Some(run) = run_blocking({
+            let store = store.clone();
+            move || {
+                store
+                    .get_pipeline_run(&lookup_id)
+                    .map_err(|err| err.to_string())
+            }
+        })
+        .await?
+        else {
+            return Ok(err_result(
+                "NOT_FOUND",
+                format!("Pipeline job '{id}' was not found"),
+                false,
+            ));
+        };
+        let path = run.file_path.clone();
+        let ocr_language = state.config.lock().await.ocr_language.clone();
+        let retry_result = run_blocking(move || {
+            store
+                .ingest_file(
                     std::path::Path::new(&path),
                     &masterd_data::IngestConfig { ocr_language },
                 )
-            })
-            .await
-            .map_err(|err| err.to_string())?
-            .map_err(|err| err.to_string()) {
-                return Ok(ok(map_pipeline_run(updated.run)));
-            }
-            return Ok(ok(map_pipeline_run(run)));
-        }
+                .map_err(|err| err.to_string())
+        })
+        .await;
+        return match retry_result {
+            Ok(updated) => Ok(ok(map_pipeline_run(updated.run))),
+            Err(err) => Ok(err_result(
+                "RETRY_FAILED",
+                format!("Retry failed for job '{id}': {err}"),
+                true,
+            )),
+        };
     }
-    Ok(ok(empty_pipeline_job(id)))
+    Ok(err_result(
+        "DATA_STORE_UNAVAILABLE",
+        "Canonical pipeline store is unavailable",
+        true,
+    ))
 }
 
 #[tauri::command]
-async fn pipeline_cancel_job(state: State<'_, AppState>, id: String) -> Result<ApiResult<PipelineJob>, String> {
+async fn pipeline_cancel_job(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<PipelineJob>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(Some(run)) = store.update_pipeline_run_status(&id, "error", Some("cancelled")) {
+        let lookup_id = id.clone();
+        if let Some(run) = run_blocking(move || {
+            store
+                .update_pipeline_run_status(&lookup_id, "error", Some("cancelled"))
+                .map_err(|err| err.to_string())
+        })
+        .await?
+        {
             return Ok(ok(map_pipeline_run(run)));
         }
     }
@@ -860,21 +1360,48 @@ async fn pipeline_cancel_job(state: State<'_, AppState>, id: String) -> Result<A
 }
 
 #[tauri::command]
-async fn review_list(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> Result<ApiResult<Paginated<ReviewItem>>, String> {
+async fn review_list(
+    state: State<'_, AppState>,
+    #[allow(unused)] params: Option<serde_json::Value>,
+) -> Result<ApiResult<Paginated<ReviewItem>>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(items) = store.list_review_items(100, 0) {
-            let items = items.into_iter().map(map_review).collect::<Vec<_>>();
-            let total = items.len() as u64;
-            return Ok(ok(Paginated { items, total, limit: 100, offset: 0 }));
-        }
+        let items = run_blocking(move || {
+            store
+                .list_review_items(100, 0)
+                .map_err(|err| err.to_string())
+        })
+        .await?;
+        let items = items.into_iter().map(map_review).collect::<Vec<_>>();
+        let total = items.len() as u64;
+        return Ok(ok(Paginated {
+            items,
+            total,
+            limit: 100,
+            offset: 0,
+        }));
     }
     Ok(ok(Paginated::empty()))
 }
 
 #[tauri::command]
-async fn review_resolve(state: State<'_, AppState>, id: String, resolution: serde_json::Value) -> Result<ApiResult<ReviewItem>, String> {
+async fn review_resolve(
+    state: State<'_, AppState>,
+    id: String,
+    resolution: serde_json::Value,
+) -> Result<ApiResult<ReviewItem>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(Some(item)) = store.resolve_review(&id, resolution.get("approved").and_then(|v| v.as_bool()).unwrap_or(true)) {
+        let lookup_id = id.clone();
+        let approved = resolution
+            .get("approved")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        if let Some(item) = run_blocking(move || {
+            store
+                .resolve_review(&lookup_id, approved)
+                .map_err(|err| err.to_string())
+        })
+        .await?
+        {
             return Ok(ok(map_review(item)));
         }
     }
@@ -919,7 +1446,10 @@ async fn rules_delete(id: String) -> ApiResult<EmptyOk> {
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn rules_test(rule: serde_json::Value, documentId: Option<String>) -> ApiResult<RuleTestResult> {
+async fn rules_test(
+    rule: serde_json::Value,
+    documentId: Option<String>,
+) -> ApiResult<RuleTestResult> {
     ok(RuleTestResult {
         matched: documentId.is_some() || !rule.is_null(),
         actions_evaluated: vec![json!({
@@ -931,31 +1461,53 @@ async fn rules_test(rule: serde_json::Value, documentId: Option<String>) -> ApiR
 }
 
 #[tauri::command]
-async fn audit_list(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> Result<ApiResult<Paginated<AuditEntry>>, String> {
+async fn audit_list(
+    state: State<'_, AppState>,
+    #[allow(unused)] params: Option<serde_json::Value>,
+) -> Result<ApiResult<Paginated<AuditEntry>>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(items) = store.list_audit_entries(100, 0) {
-            let items = items.into_iter().map(map_audit).collect::<Vec<_>>();
-            let total = items.len() as u64;
-            return Ok(ok(Paginated { items, total, limit: 100, offset: 0 }));
-        }
+        let items = run_blocking(move || {
+            store
+                .list_audit_entries(100, 0)
+                .map_err(|err| err.to_string())
+        })
+        .await?;
+        let items = items.into_iter().map(map_audit).collect::<Vec<_>>();
+        let total = items.len() as u64;
+        return Ok(ok(Paginated {
+            items,
+            total,
+            limit: 100,
+            offset: 0,
+        }));
     }
     Ok(ok(Paginated::empty()))
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn audit_get_for_document(state: State<'_, AppState>, documentId: String) -> Result<ApiResult<Vec<AuditEntry>>, String> {
+async fn audit_get_for_document(
+    state: State<'_, AppState>,
+    documentId: String,
+) -> Result<ApiResult<Vec<AuditEntry>>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(items) = store.audit_entries_for_document(&documentId) {
-            return Ok(ok(items.into_iter().map(map_audit).collect()));
-        }
+        let items = run_blocking(move || {
+            store
+                .audit_entries_for_document(&documentId)
+                .map_err(|err| err.to_string())
+        })
+        .await?;
+        return Ok(ok(items.into_iter().map(map_audit).collect()));
     }
     Ok(ok(vec![]))
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn audit_revert(state: State<'_, AppState>, entryId: String) -> Result<ApiResult<ActionResult>, String> {
+async fn audit_revert(
+    state: State<'_, AppState>,
+    entryId: String,
+) -> Result<ApiResult<ActionResult>, String> {
     if data_store(&state).is_some() {
         return Ok(ok(empty_action(entryId, "audit entry reverted")));
     }
@@ -973,11 +1525,13 @@ pub struct PreferenceEventRequest {
 }
 
 #[tauri::command]
-async fn preferences_list(state: State<'_, AppState>) -> Result<ApiResult<Vec<masterd_data::LearnedPreference>>, String> {
+async fn preferences_list(
+    state: State<'_, AppState>,
+) -> Result<ApiResult<Vec<masterd_data::LearnedPreference>>, String> {
     if let Some(store) = data_store(&state) {
-        if let Ok(preferences) = store.list_preferences() {
-            return Ok(ok(preferences));
-        }
+        let preferences =
+            run_blocking(move || store.list_preferences().map_err(|err| err.to_string())).await?;
+        return Ok(ok(preferences));
     }
     Ok(ok(vec![]))
 }
@@ -988,41 +1542,84 @@ async fn preferences_record_event(
     event: PreferenceEventRequest,
 ) -> Result<ApiResult<masterd_data::LearnedPreference>, String> {
     let Some(store) = data_store(&state) else {
-        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
+        return Ok(err_result(
+            "DATA_STORE_UNAVAILABLE",
+            "Canonical preference store is unavailable",
+            true,
+        ));
     };
-    let learned = store
-        .store_preference_event(PreferenceEvent {
-            id: Uuid::new_v4().to_string(),
-            category: event.category,
-            signal: event.signal,
-            value: event.value,
-            source: event.source.unwrap_or_else(|| "desktop".to_string()),
-            confidence: event.confidence.unwrap_or(0.75).clamp(0.0, 1.0),
-            created_at: now_ts(),
-        })
-        .map_err(|err| err.to_string())?;
+    let learned = run_blocking(move || {
+        store
+            .store_preference_event(PreferenceEvent {
+                id: Uuid::new_v4().to_string(),
+                category: event.category,
+                signal: event.signal,
+                value: event.value,
+                source: event.source.unwrap_or_else(|| "desktop".to_string()),
+                confidence: event.confidence.unwrap_or(0.75).clamp(0.0, 1.0),
+                created_at: now_ts(),
+            })
+            .map_err(|err| err.to_string())
+    })
+    .await?;
     Ok(ok(learned))
 }
 
 #[tauri::command]
-async fn preferences_approve(state: State<'_, AppState>, id: String) -> Result<ApiResult<masterd_data::LearnedPreference>, String> {
+async fn preferences_approve(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<masterd_data::LearnedPreference>, String> {
     let Some(store) = data_store(&state) else {
-        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
+        return Ok(err_result(
+            "DATA_STORE_UNAVAILABLE",
+            "Canonical preference store is unavailable",
+            true,
+        ));
     };
-    match store.set_preference_status(&id, "approved").map_err(|err| err.to_string())? {
+    let lookup_id = id.clone();
+    match run_blocking(move || {
+        store
+            .set_preference_status(&lookup_id, "approved")
+            .map_err(|err| err.to_string())
+    })
+    .await?
+    {
         Some(preference) => Ok(ok(preference)),
-        None => Ok(err_result("NOT_FOUND", format!("Preference '{id}' was not found"), false)),
+        None => Ok(err_result(
+            "NOT_FOUND",
+            format!("Preference '{id}' was not found"),
+            false,
+        )),
     }
 }
 
 #[tauri::command]
-async fn preferences_dismiss(state: State<'_, AppState>, id: String) -> Result<ApiResult<masterd_data::LearnedPreference>, String> {
+async fn preferences_dismiss(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ApiResult<masterd_data::LearnedPreference>, String> {
     let Some(store) = data_store(&state) else {
-        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
+        return Ok(err_result(
+            "DATA_STORE_UNAVAILABLE",
+            "Canonical preference store is unavailable",
+            true,
+        ));
     };
-    match store.set_preference_status(&id, "dismissed").map_err(|err| err.to_string())? {
+    let lookup_id = id.clone();
+    match run_blocking(move || {
+        store
+            .set_preference_status(&lookup_id, "dismissed")
+            .map_err(|err| err.to_string())
+    })
+    .await?
+    {
         Some(preference) => Ok(ok(preference)),
-        None => Ok(err_result("NOT_FOUND", format!("Preference '{id}' was not found"), false)),
+        None => Ok(err_result(
+            "NOT_FOUND",
+            format!("Preference '{id}' was not found"),
+            false,
+        )),
     }
 }
 
@@ -1051,7 +1648,11 @@ async fn preferences_draft_policy(
     request: PreferenceDraftRequest,
 ) -> Result<ApiResult<PreferenceDraft>, String> {
     let Some(store) = data_store(&state) else {
-        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
+        return Ok(err_result(
+            "DATA_STORE_UNAVAILABLE",
+            "Canonical preference store is unavailable",
+            true,
+        ));
     };
 
     let document_id_for_db = request.document_id.clone();
@@ -1137,7 +1738,11 @@ Return one JSON object with:
     let raw_text = state
         .chat_engine
         .clone()
-        .generate_instruct_text(system_prompt, user_prompt, max_tokens.unwrap_or(384).min(1024))
+        .generate_instruct_text(
+            system_prompt,
+            user_prompt,
+            max_tokens.unwrap_or(384).min(1024),
+        )
         .await
         .map_err(|err| err.to_string())?;
     let parsed = parse_first_json_object(&raw_text);
@@ -1171,20 +1776,49 @@ async fn retrieval_explain(
     params: RetrievalExplainRequest,
 ) -> Result<ApiResult<masterd_data::RetrievalTrace>, String> {
     let Some(store) = data_store(&state) else {
-        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical retrieval store is unavailable", true));
+        return Ok(err_result(
+            "DATA_STORE_UNAVAILABLE",
+            "Canonical retrieval store is unavailable",
+            true,
+        ));
     };
     if let Some(trace_id) = params.trace_id {
-        if let Some(trace) = store.get_retrieval_trace(&trace_id).map_err(|err| err.to_string())? {
+        let lookup_id = trace_id.clone();
+        if let Some(trace) = run_blocking(move || {
+            store
+                .get_retrieval_trace(&lookup_id)
+                .map_err(|err| err.to_string())
+        })
+        .await?
+        {
             return Ok(ok(trace));
         }
-        return Ok(err_result("NOT_FOUND", format!("Retrieval trace '{trace_id}' was not found"), false));
+        return Ok(err_result(
+            "NOT_FOUND",
+            format!("Retrieval trace '{trace_id}' was not found"),
+            false,
+        ));
     }
     let query = params.query.unwrap_or_default();
     if query.trim().is_empty() {
-        return Ok(err_result("EMPTY_QUERY", "retrieval.explain requires a traceId or query", true));
+        return Ok(err_result(
+            "EMPTY_QUERY",
+            "retrieval.explain requires a traceId or query",
+            true,
+        ));
     }
-    let mode = params.mode.as_deref().map(DataSearchMode::from_str_lossy).unwrap_or_default();
-    let trace = store.search(&query, mode, params.top_k.unwrap_or(8).max(1)).map_err(|err| err.to_string())?;
+    let mode = params
+        .mode
+        .as_deref()
+        .map(DataSearchMode::from_str_lossy)
+        .unwrap_or_default();
+    let top_k = params.top_k.unwrap_or(8).max(1);
+    let trace = run_blocking(move || {
+        store
+            .search(&query, mode, top_k)
+            .map_err(|err| err.to_string())
+    })
+    .await?;
     Ok(ok(trace))
 }
 
@@ -1250,37 +1884,205 @@ async fn settings_get(
     Ok(ok(state.config.lock().await.clone()))
 }
 
+fn validation_error(code: &str, message: impl Into<String>) -> ApiError {
+    ApiError {
+        code: code.to_string(),
+        message: message.into(),
+        recoverable: true,
+    }
+}
+
+fn validate_local_http_url(field: &str, value: &str) -> Result<(), ApiError> {
+    let url = reqwest::Url::parse(value).map_err(|err| {
+        validation_error(
+            "INVALID_URL",
+            format!("{field} must be a valid local HTTP URL: {err}"),
+        )
+    })?;
+    if url.scheme() != "http" {
+        return Err(validation_error(
+            "INVALID_URL",
+            format!("{field} must use http://"),
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(validation_error(
+            "INVALID_URL",
+            format!("{field} must not include credentials"),
+        ));
+    }
+    let Some(host) = url.host_str() else {
+        return Err(validation_error(
+            "INVALID_URL",
+            format!("{field} must include a host"),
+        ));
+    };
+    if !matches!(host, "127.0.0.1" | "localhost" | "::1") {
+        return Err(validation_error(
+            "INVALID_URL",
+            format!("{field} must point at localhost"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_app_config(config: &crate::state::AppConfig) -> Result<(), ApiError> {
+    if !config.generation_temp.is_finite() || !(0.0..=2.0).contains(&config.generation_temp) {
+        return Err(validation_error(
+            "INVALID_TEMP",
+            "Temperature must be between 0.0 and 2.0",
+        ));
+    }
+    if !(40..=99).contains(&config.safety_confidence_pct) {
+        return Err(validation_error(
+            "INVALID_CONFIDENCE",
+            "Safety confidence must be between 40 and 99",
+        ));
+    }
+    if !(1..=50).contains(&config.bm25_top_k) {
+        return Err(validation_error(
+            "INVALID_TOP_K",
+            "BM25 top K must be between 1 and 50",
+        ));
+    }
+    if !(1..=50).contains(&config.rag_top_k) {
+        return Err(validation_error(
+            "INVALID_RAG_TOP_K",
+            "RAG top K must be between 1 and 50",
+        ));
+    }
+    if !(1..=8192).contains(&config.generation_max_tokens) {
+        return Err(validation_error(
+            "INVALID_MAX_TOKENS",
+            "Max generation tokens must be between 1 and 8192",
+        ));
+    }
+    if !(1..=16).contains(&config.intake_max_depth) {
+        return Err(validation_error(
+            "INVALID_INTAKE_DEPTH",
+            "Intake max depth must be between 1 and 16",
+        ));
+    }
+    if !matches!(config.chat_model.as_str(), "auto" | "instruct" | "thinking") {
+        return Err(validation_error(
+            "INVALID_CHAT_MODEL",
+            "Chat model must be auto, instruct, or thinking",
+        ));
+    }
+    if !matches!(config.embedding_backend.as_str(), "http" | "direct") {
+        return Err(validation_error(
+            "INVALID_EMBEDDING_BACKEND",
+            "Embedding backend must be http or direct",
+        ));
+    }
+    if config.ocr_language.is_empty()
+        || config.ocr_language.len() > 64
+        || !config
+            .ocr_language
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '_' | '-'))
+    {
+        return Err(validation_error(
+            "INVALID_OCR_LANGUAGE",
+            "OCR language must be a short Tesseract language code",
+        ));
+    }
+    if config.intake_extensions.is_empty()
+        || config.intake_extensions.iter().any(|extension| {
+            extension.is_empty()
+                || extension.len() > 16
+                || !extension
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
+        })
+    {
+        return Err(validation_error(
+            "INVALID_INTAKE_EXTENSIONS",
+            "Intake extensions must be lowercase names without dots",
+        ));
+    }
+    validate_local_http_url("searxngUrl", &config.searxng_url)?;
+    validate_local_http_url("colbertUrl", &config.colbert_url)?;
+    validate_local_http_url("jinaUrl", &config.jina_url)?;
+    validate_local_http_url("ollamaUrl", &config.ollama_url)?;
+    Ok(())
+}
+
 /// Save a new app configuration and hot-reload generation parameters.
 #[tauri::command]
 async fn settings_save(
     state: State<'_, AppState>,
     config: crate::state::AppConfig,
 ) -> Result<ApiResult<EmptyOk>, String> {
-    // Validate settings before saving
-    if config.generation_temp < 0.0 || config.generation_temp > 2.0 {
-        return Ok(err_result("INVALID_TEMP", "Temperature must be between 0.0 and 2.0", true));
-    }
-    if config.safety_confidence_pct < 40 || config.safety_confidence_pct > 99 {
-        return Ok(err_result("INVALID_CONFIDENCE", "Safety confidence must be between 40 and 99", true));
-    }
-    if config.bm25_top_k < 1 || config.bm25_top_k > 50 {
-        return Ok(err_result("INVALID_TOP_K", "BM25 top K must be between 1 and 50", true));
+    if let Err(error) = validate_app_config(&config) {
+        return Ok(err_result(error.code, error.message, error.recoverable));
     }
 
     // Persist immediately to disk so a crash doesn't lose the new config.
-    {
+    let config_path = {
         let dirs_guard = state.dirs.lock().unwrap();
-        if let Some(dirs) = dirs_guard.as_ref() {
-            if let Ok(json) = serde_json::to_string_pretty(&config) {
-                if let Err(e) = std::fs::write(dirs.config_json(), &json) {
-                    tracing::error!("settings_save: write failed: {e}");
-                    return Ok(err_result("WRITE_FAILED", format!("Failed to save config: {}", e), true));
-                }
-            }
+        dirs_guard.as_ref().map(|dirs| dirs.config_json())
+    };
+    if let Some(path) = config_path {
+        let json = serde_json::to_vec_pretty(&config).map_err(|err| err.to_string())?;
+        if let Err(e) = run_blocking(move || {
+            crate::state::write_atomic(&path, &json).map_err(|err| err.to_string())
+        })
+        .await
+        {
+            tracing::error!("settings_save: write failed: {e}");
+            return Ok(err_result(
+                "WRITE_FAILED",
+                format!("Failed to save config: {}", e),
+                true,
+            ));
         }
     }
     *state.config.lock().await = config;
     Ok(ok(EmptyOk {}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_validation_rejects_invalid_bounds_and_urls() {
+        let mut config = crate::state::AppConfig::default();
+        config.generation_temp = f64::NAN;
+        assert_eq!(
+            validate_app_config(&config).unwrap_err().code,
+            "INVALID_TEMP"
+        );
+
+        let mut config = crate::state::AppConfig::default();
+        config.bm25_top_k = 0;
+        assert_eq!(
+            validate_app_config(&config).unwrap_err().code,
+            "INVALID_TOP_K"
+        );
+
+        let mut config = crate::state::AppConfig::default();
+        config.generation_max_tokens = 0;
+        assert_eq!(
+            validate_app_config(&config).unwrap_err().code,
+            "INVALID_MAX_TOKENS"
+        );
+
+        let mut config = crate::state::AppConfig::default();
+        config.intake_max_depth = 17;
+        assert_eq!(
+            validate_app_config(&config).unwrap_err().code,
+            "INVALID_INTAKE_DEPTH"
+        );
+
+        let mut config = crate::state::AppConfig::default();
+        config.searxng_url = "http://example.com:9265".to_string();
+        assert_eq!(
+            validate_app_config(&config).unwrap_err().code,
+            "INVALID_URL"
+        );
+    }
 }
 
 // ── Real index commands ───────────────────────────────────────────────────────
@@ -1321,46 +2123,66 @@ async fn documents_search(
     let p = params.unwrap_or_default();
     let query = p.text.unwrap_or_default();
     let top_k = p.top_k.or(p.limit).unwrap_or(50).min(50);
+    let offset = p.offset.unwrap_or(0);
     if let Some(store) = data_store(&state) {
-        if query.trim().is_empty() {
-            if let Ok(docs) = store.list_documents(top_k, p.offset.unwrap_or(0)) {
+        let query_for_store = query.clone();
+        let mode = p
+            .mode
+            .as_deref()
+            .map(DataSearchMode::from_str_lossy)
+            .unwrap_or_default();
+        if let Ok(Some(page)) = run_blocking(move || {
+            if query_for_store.trim().is_empty() {
+                let docs = store
+                    .list_documents(top_k, offset)
+                    .map_err(|err| err.to_string())?;
                 let items = docs.into_iter().map(map_document).collect::<Vec<_>>();
                 let total = items.len() as u64;
-                return Ok(ok(Paginated {
+                return Ok(Some(Paginated {
                     items,
                     total,
                     limit: top_k as u64,
-                    offset: p.offset.unwrap_or(0) as u64,
+                    offset: offset as u64,
                 }));
             }
-        } else {
-            let mode = p.mode.as_deref().map(DataSearchMode::from_str_lossy).unwrap_or_default();
-            if let Ok(trace) = store.search(&query, mode, top_k) {
-                let mut grouped: std::collections::BTreeMap<String, (f32, Vec<String>)> = std::collections::BTreeMap::new();
-                for candidate in &trace.results {
-                    let entry = grouped.entry(candidate.document_id.clone()).or_insert((candidate.score, Vec::new()));
-                    entry.0 = entry.0.max(candidate.score);
-                    if !entry.1.iter().any(|stage| stage == &candidate.source_stage) {
-                        entry.1.push(candidate.source_stage.clone());
-                    }
+
+            let trace = store
+                .search(&query_for_store, mode, top_k)
+                .map_err(|err| err.to_string())?;
+            let mut grouped: std::collections::BTreeMap<String, (f32, Vec<String>)> =
+                std::collections::BTreeMap::new();
+            for candidate in &trace.results {
+                let entry = grouped
+                    .entry(candidate.document_id.clone())
+                    .or_insert((candidate.score, Vec::new()));
+                entry.0 = entry.0.max(candidate.score);
+                if !entry.1.iter().any(|stage| stage == &candidate.source_stage) {
+                    entry.1.push(candidate.source_stage.clone());
                 }
-                let mut items = Vec::new();
-                for (document_id, (score, stages)) in grouped {
-                    if let Ok(Some(doc)) = store.get_document(&document_id) {
-                        let mut doc = map_document(doc);
-                        doc.retrieval_score = Some(score);
-                        doc.source_stages = stages;
-                        items.push(doc);
-                    }
-                }
-                let total = items.len() as u64;
-                return Ok(ok(Paginated {
-                    items,
-                    total,
-                    limit: top_k as u64,
-                    offset: p.offset.unwrap_or(0) as u64,
-                }));
             }
+            let mut items = Vec::new();
+            for (document_id, (score, stages)) in grouped {
+                if let Some(doc) = store
+                    .get_document(&document_id)
+                    .map_err(|err| err.to_string())?
+                {
+                    let mut doc = map_document(doc);
+                    doc.retrieval_score = Some(score);
+                    doc.source_stages = stages;
+                    items.push(doc);
+                }
+            }
+            let total = items.len() as u64;
+            Ok(Some(Paginated {
+                items,
+                total,
+                limit: top_k as u64,
+                offset: offset as u64,
+            }))
+        })
+        .await
+        {
+            return Ok(ok(page));
         }
     }
     let idx = state.chat_engine.index.read().await;
@@ -1380,7 +2202,12 @@ async fn documents_search(
         .collect();
     drop(idx);
     let total = out.len() as u64;
-    Ok(ok(Paginated { items: out, total, limit: top_k as u64, offset: p.offset.unwrap_or(0) as u64 }))
+    Ok(ok(Paginated {
+        items: out,
+        total,
+        limit: top_k as u64,
+        offset: offset as u64,
+    }))
 }
 
 /// Index a single document into the local BM25 index.
@@ -1411,18 +2238,27 @@ async fn index_document(
 #[derive(Serialize, Clone)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ChatStreamToken {
-    Think { text: String },
-    Response { text: String },
+    Think {
+        text: String,
+    },
+    Response {
+        text: String,
+    },
     Done {
         citations: Vec<ChatCitation>,
         #[serde(rename = "retrievalTrace", skip_serializing_if = "Option::is_none")]
         retrieval_trace: Option<masterd_data::RetrievalTrace>,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Serialize, Clone)]
-pub struct ChatCitation { pub title: String, pub url: String }
+pub struct ChatCitation {
+    pub title: String,
+    pub url: String,
+}
 
 #[tauri::command]
 #[allow(non_snake_case)]
@@ -1435,17 +2271,17 @@ async fn chat_send_message(
     sessionId: String,
     channelId: String,
 ) -> Result<(), String> {
-    use masterd_chat_engine::{ThinkMode, SearchMode};
+    use masterd_chat_engine::{SearchMode, ThinkMode};
 
     let think_mode = match thinkMode.as_str() {
         "Thinking" => ThinkMode::Thinking,
         "Instruct" => ThinkMode::Instruct,
-        _          => ThinkMode::Auto,
+        _ => ThinkMode::Auto,
     };
     let search_mode = match searchMode.as_str() {
         "WebSearch" => SearchMode::WebSearch,
-        "Both"      => SearchMode::Both,
-        _           => SearchMode::LocalDocuments,
+        "Both" => SearchMode::Both,
+        _ => SearchMode::LocalDocuments,
     };
     let data_search_mode = match searchMode.as_str() {
         "WebSearch" => None,
@@ -1480,7 +2316,8 @@ async fn chat_send_message(
                         url: format!("file://{}", candidate.path),
                     });
                 }
-                message_for_generation = format!("{context}\n[USER QUESTION]\n{message_for_generation}");
+                message_for_generation =
+                    format!("{context}\n[USER QUESTION]\n{message_for_generation}");
             }
             retrieval_trace = Some(trace);
         }
@@ -1503,7 +2340,16 @@ async fn chat_send_message(
                 .clone()
         };
         let mut session = session_snapshot;
-        if let Err(e) = engine.chat(&mut session, message_for_generation, think_mode, search_mode, tx).await {
+        if let Err(e) = engine
+            .chat(
+                &mut session,
+                message_for_generation,
+                think_mode,
+                search_mode,
+                tx,
+            )
+            .await
+        {
             tracing::error!("chat engine error: {e}");
         }
         let _ = session_done_tx.send((gen_session_id, session));
@@ -1517,11 +2363,14 @@ async fn chat_send_message(
     tokio::spawn(async move {
         while let Some(token) = rx.recv().await {
             let payload = match token {
-                ChatToken::Think(t)    => ChatStreamToken::Think { text: t },
+                ChatToken::Think(t) => ChatStreamToken::Think { text: t },
                 ChatToken::Response(t) => ChatStreamToken::Response { text: t },
                 ChatToken::Done { citations, .. } => {
                     let mut merged_citations = done_local_citations.clone();
-                    merged_citations.extend(citations.into_iter().map(|c| ChatCitation { title: c.title, url: c.url }));
+                    merged_citations.extend(citations.into_iter().map(|c| ChatCitation {
+                        title: c.title,
+                        url: c.url,
+                    }));
                     ChatStreamToken::Done {
                         citations: merged_citations,
                         retrieval_trace: done_retrieval_trace.clone(),
@@ -1548,20 +2397,23 @@ fn main() {
         .setup(|app| {
             use tauri::Manager;
             let paths = app.path();
-            let data_dir   = paths.app_data_dir()?;
+            let data_dir = paths.app_data_dir()?;
             let config_dir = paths.app_config_dir()?;
-            let cache_dir  = paths.app_cache_dir()?;
-            let log_dir    = paths.app_log_dir()?;
+            let cache_dir = paths.app_cache_dir()?;
+            let log_dir = paths.app_log_dir()?;
 
             let dirs = crate::state::AppDirs::create_all(
-                data_dir.clone(), config_dir, cache_dir, log_dir,
+                data_dir.clone(),
+                config_dir,
+                cache_dir,
+                log_dir,
             )?;
 
-            // Start bundled sidecar processes (meilisearch, valkey).
-            // Binaries are resolved relative to Tauri's resource_dir.
-            if let Ok(resource_dir) = paths.resource_dir() {
-                app.state::<SidecarSupervisor>().start_all(&resource_dir, &data_dir);
-            }
+            // Start packaged sidecars before opening the canonical datastore.
+            // Release builds fail fast if required database assets are missing.
+            let resource_dir = paths.resource_dir()?;
+            app.state::<SidecarSupervisor>()
+                .start_all(&resource_dir, &data_dir)?;
 
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
@@ -1582,20 +2434,48 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            system_get_status, system_get_health,
-            settings_get, settings_save,
-            intake_add_files, intake_add_watch_folder, intake_remove_watch_folder,
-            intake_list_queue, intake_list_watch_folders, intake_retry_item, intake_cancel_item,
-            documents_search, documents_get_by_id, documents_get_preview,
-            documents_get_extracted_text, documents_update_tags, documents_reprocess,
+            system_get_status,
+            system_get_health,
+            settings_get,
+            settings_save,
+            intake_add_files,
+            intake_add_watch_folder,
+            intake_remove_watch_folder,
+            intake_list_queue,
+            intake_list_watch_folders,
+            intake_retry_item,
+            intake_cancel_item,
+            documents_search,
+            documents_get_by_id,
+            documents_get_preview,
+            documents_get_extracted_text,
+            documents_update_tags,
+            documents_reprocess,
             index_document,
-            actions_approve_rename, actions_reject_rename, actions_approve_move,
-            actions_mark_duplicate, actions_mark_unique,
-            pipeline_list_jobs, pipeline_get_job, pipeline_retry_job, pipeline_cancel_job,
-            review_list, review_resolve,
-            rules_list, rules_get_by_id, rules_create, rules_update, rules_delete, rules_test,
-            audit_list, audit_get_for_document, audit_revert,
-            preferences_list, preferences_record_event, preferences_approve, preferences_dismiss,
+            actions_approve_rename,
+            actions_reject_rename,
+            actions_approve_move,
+            actions_mark_duplicate,
+            actions_mark_unique,
+            pipeline_list_jobs,
+            pipeline_get_job,
+            pipeline_retry_job,
+            pipeline_cancel_job,
+            review_list,
+            review_resolve,
+            rules_list,
+            rules_get_by_id,
+            rules_create,
+            rules_update,
+            rules_delete,
+            rules_test,
+            audit_list,
+            audit_get_for_document,
+            audit_revert,
+            preferences_list,
+            preferences_record_event,
+            preferences_approve,
+            preferences_dismiss,
             preferences_draft_policy,
             retrieval_explain,
             chat_send_message,

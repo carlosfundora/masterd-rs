@@ -33,8 +33,16 @@ elif command -v python3 >/dev/null 2>&1; then
 elif command -v python >/dev/null 2>&1; then
   PYTHON_BIN="python"
 else
-  die "Python is required but not found. Please install Python 3.12+ and try again."
+  die "Python is required but not found. Please install Python 3.10+ and try again."
 fi
+
+PYTHON_BIN_PATH="$(command -v "${PYTHON_BIN}")"
+"${PYTHON_BIN_PATH}" - <<'PY' || die "Selected Python interpreter must be Python 3.10 or newer"
+import sys
+if sys.version_info < (3, 10):
+    raise SystemExit(1)
+print(f"using Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+PY
 
 # Ensure clean venv if corrupted
 if [[ -d "${BOOTSTRAP_VENV}" && ! -x "${BOOTSTRAP_VENV}/bin/python" ]]; then
@@ -56,15 +64,27 @@ if [[ ! -d "${BOOTSTRAP_VENV}" ]]; then
 
   if [[ -n "${UV_BIN}" ]]; then
     info "Using uv to create relocatable venv..."
-    "${UV_BIN}" venv --seed --relocatable --python "$(command -v ${PYTHON_BIN})" "${BOOTSTRAP_VENV}"
+    if ! "${UV_BIN}" venv --seed --relocatable --python "${PYTHON_BIN_PATH}" "${BOOTSTRAP_VENV}"; then
+      die "Failed to create bootstrap venv with uv"
+    fi
   else
     info "Using standard python venv module..."
-    "$(command -v ${PYTHON_BIN})" -m venv "${BOOTSTRAP_VENV}"
+    if ! "${PYTHON_BIN_PATH}" -m venv "${BOOTSTRAP_VENV}"; then
+      die "Failed to create bootstrap venv with python venv"
+    fi
   fi
 fi
 
 # Ensure huggingface-hub is present inside bootstrap venv
 VENV_PYTHON="${BOOTSTRAP_VENV}/bin/python"
+if [[ ! -x "${VENV_PYTHON}" ]]; then
+  die "Bootstrap venv Python is missing or not executable: ${VENV_PYTHON}"
+fi
+"${VENV_PYTHON}" - <<'PY' || die "Bootstrap venv Python is not runnable or is too old"
+import sys
+if sys.version_info < (3, 10):
+    raise SystemExit(1)
+PY
 
 if ! "${VENV_PYTHON}" -c "import huggingface_hub" >/dev/null 2>&1; then
   info "Installing huggingface-hub in bootstrap venv..."
@@ -77,18 +97,17 @@ if ! "${VENV_PYTHON}" -c "import huggingface_hub" >/dev/null 2>&1; then
   fi
 
   if [[ -n "${UV_BIN}" ]]; then
-    env -u UV_EXTRA_INDEX_URL -u UV_INDEX_URL -u UV_CONSTRAINT "${UV_BIN}" pip install --python "${VENV_PYTHON}" huggingface-hub
-    if [ $? -ne 0 ]; then
+    if ! env -u UV_EXTRA_INDEX_URL -u UV_INDEX_URL -u UV_CONSTRAINT "${UV_BIN}" pip install --python "${VENV_PYTHON}" huggingface-hub; then
       die "Failed to install huggingface-hub with uv"
     fi
   else
-    "${VENV_PYTHON}" -m ensurepip --upgrade >/dev/null 2>&1 || true
-    env -u PIP_EXTRA_INDEX_URL -u PIP_INDEX_URL -u PIP_CONSTRAINT "${VENV_PYTHON}" -m pip install --upgrade pip setuptools wheel
-    if [ $? -ne 0 ]; then
+    if ! "${VENV_PYTHON}" -m ensurepip --upgrade >/dev/null 2>&1; then
+      warn "ensurepip failed or is unavailable; continuing with existing pip if present"
+    fi
+    if ! env -u PIP_EXTRA_INDEX_URL -u PIP_INDEX_URL -u PIP_CONSTRAINT "${VENV_PYTHON}" -m pip install --upgrade pip setuptools wheel; then
       die "Failed to upgrade pip/setuptools/wheel"
     fi
-    env -u PIP_EXTRA_INDEX_URL -u PIP_INDEX_URL -u PIP_CONSTRAINT "${VENV_PYTHON}" -m pip install huggingface-hub
-    if [ $? -ne 0 ]; then
+    if ! env -u PIP_EXTRA_INDEX_URL -u PIP_INDEX_URL -u PIP_CONSTRAINT "${VENV_PYTHON}" -m pip install huggingface-hub; then
       die "Failed to install huggingface-hub with pip"
     fi
   fi
