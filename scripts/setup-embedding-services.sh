@@ -28,6 +28,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICES_DIR="${ROOT_DIR}/services"
 
+source "${ROOT_DIR}/scripts/lib/install-bootstrap.sh"
+
 # ── AMD ROCm index (must be set before any uv/pip call) ──────────────────
 ROCM_TORCH_INDEX="${ROCM_TORCH_INDEX:-https://download.pytorch.org/whl/nightly/rocm6.3}"
 ROCM_STABLE_INDEX="${ROCM_STABLE_INDEX:-https://download.pytorch.org/whl/rocm6.2.4}"
@@ -58,39 +60,8 @@ warn()    { printf "%b[setup-embed]%b %s\n" "${YELLOW}" "${RESET}" "$*"; }
 die()     { printf "%b[setup-embed] ERROR:%b %s\n" "${RED}" "${RESET}" "$*" >&2; exit 1; }
 
 ensure_uv() {
-  export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
-  if command -v uv >/dev/null 2>&1; then
-    UV_BIN="$(command -v uv)"
-    return 0
-  fi
-
-  warn "uv not found; attempting to install uv for this user"
-  if command -v curl >/dev/null 2>&1; then
-    if curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1; then
-      export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
-      if command -v uv >/dev/null 2>&1; then
-        UV_BIN="$(command -v uv)"
-        success "uv installed at ${UV_BIN}"
-        return 0
-      fi
-    fi
-    warn "uv install script did not provide a usable uv binary; trying pip"
-  fi
-
-  if "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1 || "${PYTHON_BIN}" -m ensurepip --upgrade >/dev/null 2>&1; then
-    if "${PYTHON_BIN}" -m pip install --user --upgrade uv >/dev/null 2>&1; then
-      export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
-      if command -v uv >/dev/null 2>&1; then
-        UV_BIN="$(command -v uv)"
-        success "uv installed at ${UV_BIN}"
-        return 0
-      fi
-    fi
-  fi
-
-  UV_BIN=""
-  warn "uv is unavailable; falling back to python -m venv and pip"
-  return 0
+  masterd_ensure_uv "${ROOT_DIR}"
+  UV_BIN="${MASTERD_UV_BIN}"
 }
 
 create_venv() {
@@ -164,15 +135,9 @@ case "${TARGET_SERVICE}" in
 esac
 
 # Validate environment before touching anything.
-if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
-  if [[ "${PYTHON_BIN}" == "python3.12" ]] && command -v python3 >/dev/null 2>&1; then
-    warn "python3.12 not found; falling back to python3"
-    PYTHON_BIN="python3"
-  else
-    die "${PYTHON_BIN} not found. Install Python 3.12 or set PYTHON_BIN."
-  fi
-fi
 [[ -f "${ROCM_CONSTRAINTS}" ]]    || die "ROCm constraints file missing: ${ROCM_CONSTRAINTS}"
+masterd_resolve_python "${ROOT_DIR}"
+PYTHON_BIN="${MASTERD_PYTHON_BIN}"
 UV_BIN=""
 ensure_uv
 
