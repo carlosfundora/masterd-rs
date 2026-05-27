@@ -127,6 +127,21 @@ logo_line "${ALERT}" "  ANARCHY DETECTED. INITIATING FILE DISCIPLINE."
 logo_line "${WHITE}" "  ORGANIZE OR BE ORGANIZED."
 printf "%b╚%s╝%b\n" "${RED}" "${HBAR}" "${RESET}"
 
+# ── Model asset install ───────────────────────────────────────────────────
+if [[ "${MASTERD_SKIP_MODEL_DOWNLOAD:-0}" == "1" ]]; then
+  printf "%b║%b  Skipping model download/verification (MASTERD_SKIP_MODEL_DOWNLOAD=1).%b\n" "${RED}" "${YELLOW}" "${RESET}"
+else
+  printf "%b║%b  Installing/verifying local model assets...%b\n" "${RED}" "${CYAN}" "${RESET}"
+  "${ROOT_DIR}/scripts/download-models.sh"
+  printf "%b║%b  Model assets ready.%b\n" "${RED}" "${GREEN}" "${RESET}"
+fi
+
+if [[ "${MASTERD_SETUP_EMBEDDING_SERVICES:-0}" == "1" ]]; then
+  printf "%b║%b  Setting up optional embedding service environments...%b\n" "${RED}" "${CYAN}" "${RESET}"
+  "${ROOT_DIR}/scripts/setup-embedding-services.sh" all
+  printf "%b║%b  Optional embedding service environments ready.%b\n" "${RED}" "${GREEN}" "${RESET}"
+fi
+
 # ── Sidecar binary download ────────────────────────────────────────────────
 ARCH="$(uname -m)"
 case "${ARCH}" in
