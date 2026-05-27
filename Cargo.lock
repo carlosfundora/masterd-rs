@@ -4428,10 +4428,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "masterd-chat-engine",
+ "masterd-data",
  "masterd-embed-engine",
  "reqwest",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
