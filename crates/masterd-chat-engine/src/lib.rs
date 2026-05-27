@@ -34,8 +34,16 @@ static INSTRUCT_GGUF: &[u8] = include_bytes!("../assets/models/instruct/model.gg
 /// Tokenizer for the Thinking model.
 static THINKING_TOKENIZER: &[u8] = include_bytes!("../assets/models/thinking/tokenizer.json");
 
+/// Chat template for the Thinking model tokenizer.
+static THINKING_CHAT_TEMPLATE: &str =
+    include_str!("../assets/models/thinking/tokenizer.chat_template");
+
 /// Tokenizer for the Instruct model.
 static INSTRUCT_TOKENIZER: &[u8] = include_bytes!("../assets/models/instruct/tokenizer.json");
+
+/// Chat template for the Instruct model tokenizer.
+static INSTRUCT_CHAT_TEMPLATE: &str =
+    include_str!("../assets/models/instruct/tokenizer.chat_template");
 
 /// MASTERd persona prompt — injected as system context on every call.
 static MASTERD_PERSONA: &str = include_str!("../assets/prompts/masterd_personality.txt");
@@ -538,6 +546,20 @@ mod tests {
             INSTRUCT_TOKENIZER.len() > 1000,
             "instruct tokenizer suspiciously small"
         );
+    }
+
+    #[test]
+    fn tokenizer_chat_templates_are_embedded() {
+        assert!(
+            THINKING_CHAT_TEMPLATE.len() > 100,
+            "thinking chat template suspiciously small"
+        );
+        assert!(
+            INSTRUCT_CHAT_TEMPLATE.len() > 100,
+            "instruct chat template suspiciously small"
+        );
+        assert!(THINKING_CHAT_TEMPLATE.contains("<|im_start|>assistant"));
+        assert!(INSTRUCT_CHAT_TEMPLATE.contains("<|im_start|>assistant"));
     }
 
     #[test]
