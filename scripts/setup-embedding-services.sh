@@ -16,10 +16,13 @@
 #
 # Usage:
 #   ./scripts/setup-embedding-services.sh [--service colbert|jina|qwen3|all]
+#   ./scripts/setup-embedding-services.sh jina
 #
 # Environment overrides:
 #   ROCM_TORCH_INDEX   — override the primary PyTorch ROCm index URL
 #   PYTHON_BIN         — override the python interpreter (default: python3.12)
+#   HF_TOKEN           — optional Hugging Face token for gated/private models
+#   HF_HOME            — optional local Hugging Face cache root
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,7 +43,42 @@ export CUDA_VISIBLE_DEVICES=""
 unset CUDA_HOME 2>/dev/null || true
 
 PYTHON_BIN="${PYTHON_BIN:-python3.12}"
-TARGET_SERVICE="${1:-all}"
+TARGET_SERVICE="${TARGET_SERVICE:-all}"
+PREFETCH_MODELS="${PREFETCH_MODELS:-1}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --service)
+      [[ $# -ge 2 ]] || die "--service requires one of: colbert, jina, qwen3, all"
+      TARGET_SERVICE="$2"
+      shift 2
+      ;;
+    --no-prefetch)
+      PREFETCH_MODELS=0
+      shift
+      ;;
+    --help|-h)
+      cat <<'EOF'
+Usage:
+  ./scripts/setup-embedding-services.sh [--service colbert|jina|qwen3|all] [--no-prefetch]
+  ./scripts/setup-embedding-services.sh jina
+
+Environment:
+  HF_TOKEN     Optional Hugging Face token for gated/private models.
+  HF_HOME      Optional local Hugging Face cache root.
+  PYTHON_BIN   Python interpreter, default python3.12.
+EOF
+      exit 0
+      ;;
+    colbert|jina|qwen3|all)
+      TARGET_SERVICE="$1"
+      shift
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
 
 RED=$'\033[38;5;196m'
 GREEN=$'\033[38;5;46m'
@@ -91,6 +129,36 @@ setup_venv() {
   else
     warn "  No requirements.txt found at ${reqs_file} — skipping package install."
   fi
+}
+
+prefetch_hf_model() {
+  local service_name="$1"
+  local model_env_name="$2"
+  local default_model="$3"
+  local trust_remote_code="$4"
+  local venv_python="${SERVICES_DIR}/${service_name}/.venv/bin/python"
+  local model_name="${!model_env_name:-${default_model}}"
+
+  if [[ "${PREFETCH_MODELS}" != "1" ]]; then
+    warn "  model prefetch disabled for ${service_name}"
+    return 0
+  fi
+
+  info "  Prefetching ${model_name} for ${service_name}..."
+  MODEL_NAME="${model_name}" TRUST_REMOTE_CODE="${trust_remote_code}" "${venv_python}" - <<'PY'
+import os
+from transformers import AutoModel, AutoTokenizer
+
+model_name = os.environ["MODEL_NAME"]
+trust_remote_code = os.environ.get("TRUST_REMOTE_CODE") == "1"
+
+tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+model = AutoModel.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+
+print(f"prefetched {model_name}")
+print(f"tokenizer={type(tokenizer).__name__} model={type(model).__name__}")
+PY
+  success "  ${service_name} model cache ready."
 }
 
 # ── Write service requirements files (idempotent) ────────────────────────
@@ -215,6 +283,7 @@ torch
 fastapi
 uvicorn[standard]
 transformers
+sentence-transformers
 einops
 sentencepiece
 huggingface-hub
@@ -240,6 +309,7 @@ _tokenizer = None
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_NAME = os.getenv("JINA_MODEL", "jinaai/jina-embeddings-v3")
+MAX_LENGTH = int(os.getenv("JINA_MAX_LENGTH", "8192"))
 
 
 @app.on_event("startup")
@@ -263,15 +333,21 @@ async def health() -> dict:
 @app.post("/embed")
 async def embed(req: EmbedRequest) -> dict:
     assert _model is not None, "Model not loaded"
-    enc = _tokenizer(
-        req.texts, padding=True, truncation=True, max_length=512, return_tensors="pt"
-    ).to(DEVICE)
-    with torch.no_grad():
-        out = _model(**enc)
-    # Mean pool over token dim, then L2-normalize.
-    mask = enc["attention_mask"].unsqueeze(-1).float()
-    vecs = (out.last_hidden_state * mask).sum(1) / mask.sum(1)
-    vecs = torch.nn.functional.normalize(vecs, dim=-1)
+    if hasattr(_model, "encode"):
+        with torch.no_grad():
+            vecs = _model.encode(req.texts, task=req.task, max_length=MAX_LENGTH)
+        if not isinstance(vecs, torch.Tensor):
+            vecs = torch.tensor(vecs)
+        vecs = torch.nn.functional.normalize(vecs, dim=-1)
+    else:
+        enc = _tokenizer(
+            req.texts, padding=True, truncation=True, max_length=MAX_LENGTH, return_tensors="pt"
+        ).to(DEVICE)
+        with torch.no_grad():
+            out = _model(**enc)
+        mask = enc["attention_mask"].unsqueeze(-1).float()
+        vecs = (out.last_hidden_state * mask).sum(1) / mask.sum(1)
+        vecs = torch.nn.functional.normalize(vecs, dim=-1)
     return {"embeddings": vecs.cpu().tolist(), "dim": vecs.shape[-1]}
 
 
@@ -364,6 +440,7 @@ case "${TARGET_SERVICE}" in
   jina|all)
     write_jina_reqs
     setup_venv "jina-service"
+    prefetch_hf_model "jina-service" "JINA_MODEL" "jinaai/jina-embeddings-v3" "1"
     ;;&
   qwen3|all)
     write_qwen3_reqs
