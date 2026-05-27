@@ -16,7 +16,7 @@ dedup_mode = "rigorous"
 target = "tauri_only"
 
 [embeddings]
-jina_model = "jina-embeddings-v5-omni-small"
+jina_model = "jina-v5-omni-small-gguf"
 jina_runtime = "local_only"
 multimodal_optional = true
 

@@ -45,6 +45,8 @@ models/
   lfm2.5-1.2b-thinking/   ← LFM2.5-1.2B-Thinking Q8_0 GGUF + tokenizer
   lfm2.5-350m-instruct/   ← LFM2.5-350M-Instruct Q8_0 GGUF + tokenizer
   lfm2-colbert-350m/      ← LFM2-ColBERT-350M Q8_0 GGUF (reranker)
+  jina-v5-omni-nano-gguf/ ← Jina v5 Omni Nano retrieval/text-matching Q4_K_M GGUF
+  jina-v5-omni-small-gguf/← Jina v5 Omni Small retrieval/text-matching Q4_K_M GGUF
   masterd-identity/       ← MASTERd system personality prompt
 
 services/

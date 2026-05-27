@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -98,6 +98,38 @@ pub fn synthesize_load_plan(header: &GgufHeaderV3, max_prefetch_mb: u64) -> Gguf
         io_chunk_bytes,
         use_mmap: prefetch_bytes >= 8 * 1024 * 1024,
         use_pinned_staging: prefetch_bytes >= 2 * 1024 * 1024,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallPathResolver {
+    root: PathBuf,
+}
+
+impl InstallPathResolver {
+    pub fn from_root(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn from_env_or_cwd() -> Result<Self, std::io::Error> {
+        for key in ["MASTERD_RESOURCE_DIR", "MASTERD_INSTALL_ROOT"] {
+            if let Some(value) = std::env::var_os(key) {
+                return Ok(Self::from_root(PathBuf::from(value)));
+            }
+        }
+        Ok(Self::from_root(std::env::current_dir()?))
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn resolve(&self, relative: impl AsRef<Path>) -> PathBuf {
+        self.root.join(relative)
+    }
+
+    pub fn model_asset(&self, spec: &MasterdModelRuntimeSpec) -> PathBuf {
+        self.resolve(spec.model_dir).join(spec.weights)
     }
 }
 
@@ -349,10 +381,12 @@ pub fn cpu_acceleration_flags() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BitWidth, GGUF_HEADER_BYTES, GgufError, GgufHeaderV3, MASTERD_KERNEL_CAPABILITIES,
-        MASTERD_MODEL_RUNTIME_SPECS, ModelAssetFormat, PreferredRuntime, RotorQuantCodec,
-        RotorQuantMode, TurboQuantizer, parse_gguf_header_bytes, synthesize_load_plan,
+        BitWidth, GGUF_HEADER_BYTES, GgufError, GgufHeaderV3, InstallPathResolver,
+        MASTERD_KERNEL_CAPABILITIES, MASTERD_MODEL_RUNTIME_SPECS, ModelAssetFormat,
+        PreferredRuntime, RotorQuantCodec, RotorQuantMode, TurboQuantizer, parse_gguf_header_bytes,
+        runtime_spec, synthesize_load_plan,
     };
+    use std::path::PathBuf;
 
     fn sample_header_bytes(version: u32, tensors: u64, kv: u64) -> [u8; GGUF_HEADER_BYTES] {
         let mut out = [0u8; GGUF_HEADER_BYTES];
@@ -407,9 +441,24 @@ mod tests {
             .find(|spec| spec.id == "jina-v5-omni-nano")
             .expect("jina spec");
         assert_eq!(jina.asset_format, ModelAssetFormat::Gguf);
-        assert_eq!(jina.preferred_runtime, PreferredRuntime::LlamaCppGgufSidecar);
+        assert_eq!(
+            jina.preferred_runtime,
+            PreferredRuntime::LlamaCppGgufSidecar
+        );
         assert_eq!(jina.model_dir, "models/jina-v5-omni-nano-gguf/retrieval");
         assert_eq!(jina.weights, "model-Q4_K_M.gguf");
+    }
+
+    #[test]
+    fn install_path_resolver_maps_specs_under_resource_root() {
+        let resolver = InstallPathResolver::from_root("/opt/masterd/resources");
+        let jina = runtime_spec("jina-v5-omni-small").expect("jina small spec");
+        assert_eq!(
+            resolver.model_asset(jina),
+            PathBuf::from(
+                "/opt/masterd/resources/models/jina-v5-omni-small-gguf/retrieval/model-Q4_K_M.gguf"
+            )
+        );
     }
 
     #[test]

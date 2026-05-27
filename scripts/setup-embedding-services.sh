@@ -321,13 +321,26 @@ Provides:
 from __future__ import annotations
 import os
 import torch
+from pathlib import Path
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-# Abstract path resolution through an installation resolution layer
+def install_root() -> Path:
+    """Resolve the packaged resource root for installed users and repo root for dev."""
+    for env_key in ("MASTERD_RESOURCE_DIR", "MASTERD_INSTALL_ROOT"):
+        value = os.environ.get(env_key)
+        if value:
+            return Path(value).expanduser().resolve()
+    return Path(__file__).resolve().parents[2]
+
+
 def resolve_install_path(rel_path: str) -> str:
-    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    return os.path.abspath(os.path.join(root_dir, rel_path))
+    return str((install_root() / rel_path).resolve())
+
+
+def resolve_model_asset(*parts: str) -> Path:
+    model_root = Path(os.environ.get("MASTERD_MODELS_DIR", resolve_install_path("models")))
+    return (model_root.joinpath(*parts)).expanduser().resolve()
 
 # Set local Hugging Face cache root to keep the installation self-contained
 if "HF_HOME" not in os.environ:
@@ -583,21 +596,21 @@ _tokenizer = None
 
 DEVICE = "cpu"
 
-local_model_small = resolve_install_path("models/jina-v5-omni-small")
-local_model_nano = resolve_install_path("models/jina-v5-omni-nano")
-if os.path.isdir(local_model_small) and os.path.exists(os.path.join(local_model_small, "config.json")):
-    DEFAULT_MODEL = local_model_small
-elif os.path.isdir(local_model_nano) and os.path.exists(os.path.join(local_model_nano, "config.json")):
-    DEFAULT_MODEL = local_model_nano
-else:
-    DEFAULT_MODEL = "jinaai/jina-embeddings-v5-omni-nano"
+JINA_V5_GGUF_ASSETS = {
+    "nano_retrieval": resolve_model_asset("jina-v5-omni-nano-gguf", "retrieval", "model-Q4_K_M.gguf"),
+    "nano_text_matching": resolve_model_asset("jina-v5-omni-nano-gguf", "text-matching", "model-Q4_K_M.gguf"),
+    "small_retrieval": resolve_model_asset("jina-v5-omni-small-gguf", "retrieval", "model-Q4_K_M.gguf"),
+    "small_text_matching": resolve_model_asset("jina-v5-omni-small-gguf", "text-matching", "model-Q4_K_M.gguf"),
+}
 
-MODEL_NAME = os.getenv("JINA_V5_MODEL", DEFAULT_MODEL)
+MODEL_NAME = os.getenv("JINA_V5_MODEL", "")
 
 
 @app.on_event("startup")
 async def load_model() -> None:
     global _model, _tokenizer
+    if not MODEL_NAME:
+        return
     from transformers import AutoTokenizer, AutoModel
     _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     _model = AutoModel.from_pretrained(MODEL_NAME, trust_remote_code=True).to(DEVICE).eval()
@@ -613,13 +626,26 @@ class EmbedRequest(BaseModel):
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "device": DEVICE, "model": MODEL_NAME}
+    gguf_assets = {name: str(path) for name, path in JINA_V5_GGUF_ASSETS.items()}
+    missing = [name for name, path in JINA_V5_GGUF_ASSETS.items() if not path.is_file()]
+    return {
+        "status": "ok" if not missing else "degraded",
+        "device": DEVICE,
+        "model": MODEL_NAME or "gguf-assets-only",
+        "install_root": str(install_root()),
+        "gguf_assets": gguf_assets,
+        "missing_gguf_assets": missing,
+    }
 
 
 @app.post("/embed")
 @app.post("/v1/embeddings")
 async def embed(req: EmbedRequest) -> dict:
-    assert _model is not None, "Model not loaded"
+    if _model is None:
+        return {
+            "error": "Jina v5 transformers runtime is not loaded; packaged GGUF assets are available for the GGUF runtime",
+            "gguf_assets": {name: str(path) for name, path in JINA_V5_GGUF_ASSETS.items()},
+        }
     texts = req.input if req.input is not None else req.texts
     if texts is None:
         return {"error": "either 'input' or 'texts' is required"}
@@ -671,7 +697,7 @@ case "${TARGET_SERVICE}" in
   jina-v5|all)
     write_jina_v5_reqs
     setup_venv "jina-v5-service"
-    prefetch_hf_model "jina-v5-service" "JINA_V5_MODEL" "jinaai/jina-embeddings-v5-omni-nano" "1"
+    info "Jina v5 GGUF assets are installed by scripts/download-models.sh; skipping safetensors prefetch."
     ;;&
 esac
 

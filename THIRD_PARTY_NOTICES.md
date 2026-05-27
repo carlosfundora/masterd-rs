@@ -16,7 +16,7 @@ metadata inside each vendored project remain authoritative for that project.
   and LFM2 ColBERT variants. Model weights, tokenizers, names, and usage terms
   remain governed by their upstream Liquid AI model licenses.
 - Jina AI models: credited for Jina embedding model usage, including
-  `jina-embeddings-v5-omni-small` and the local `jina-code-embed` endpoint name
+  `jina-embeddings-v5-omni-small-*-GGUF` and the local `jina-code-embed` endpoint name
   used by the embedding configuration. Model usage remains governed by Jina AI's
   upstream model licenses and terms.
 - ColBERT / MaxSim reranking: credited for the late-interaction retrieval and

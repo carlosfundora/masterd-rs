@@ -631,7 +631,7 @@ impl OptionalMultimodalEmbedder for OptionalJinaOmniMultimodal {
             "ts": Utc::now().to_rfc3339(),
             "path": doc.path,
             "content_hash": doc.content_hash,
-            "model": "jina-embeddings-v5-omni-small",
+            "model": "jina-v5-omni-small-gguf",
             "mode": "optional_multimodal"
         });
         writeln!(file, "{}", serde_json::to_string(&row)?)?;

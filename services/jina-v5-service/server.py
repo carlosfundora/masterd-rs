@@ -45,16 +45,7 @@ JINA_V5_GGUF_ASSETS = {
     "small_text_matching": resolve_model_asset("jina-v5-omni-small-gguf", "text-matching", "model-Q4_K_M.gguf"),
 }
 
-local_model_small = Path(resolve_install_path("models/jina-v5-omni-small"))
-local_model_nano = Path(resolve_install_path("models/jina-v5-omni-nano"))
-if local_model_small.is_dir() and (local_model_small / "config.json").exists():
-    DEFAULT_MODEL = local_model_small
-elif local_model_nano.is_dir() and (local_model_nano / "config.json").exists():
-    DEFAULT_MODEL = local_model_nano
-else:
-    DEFAULT_MODEL = None
-
-MODEL_NAME = os.getenv("JINA_V5_MODEL", str(DEFAULT_MODEL) if DEFAULT_MODEL else "")
+MODEL_NAME = os.getenv("JINA_V5_MODEL", "")
 
 
 @app.on_event("startup")

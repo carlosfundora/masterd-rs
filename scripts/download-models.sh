@@ -188,7 +188,7 @@ PY
 
 # ── HuggingFace snapshot download helper ──────────────────────────────────
 hf_snapshot_download() {
-  local repo="$1"        # e.g. jinaai/jina-embeddings-v5-omni-nano
+  local repo="$1"        # e.g. jinaai/jina-embeddings-v5-omni-nano-retrieval-GGUF
   local dest="$2"        # destination file path
   local label="$3"
 
