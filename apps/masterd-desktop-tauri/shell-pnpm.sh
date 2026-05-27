@@ -9,11 +9,18 @@ if ! command -v pnpm >/dev/null 2>&1; then
   exit 127
 fi
 
-if [[ ! -x "${SHELL_DIR}/node_modules/.bin/next" ]]; then
+run_install() {
   if [[ -f "${SHELL_DIR}/pnpm-lock.yaml" ]]; then
     pnpm --dir "${SHELL_DIR}" install --frozen-lockfile
   else
     pnpm --dir "${SHELL_DIR}" install
+  fi
+}
+
+if [[ ! -x "${SHELL_DIR}/node_modules/.bin/next" ]]; then
+  if ! run_install; then
+    pnpm --dir "${SHELL_DIR}" approve-builds --all
+    run_install
   fi
 fi
 
