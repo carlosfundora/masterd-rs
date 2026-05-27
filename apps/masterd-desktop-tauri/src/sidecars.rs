@@ -78,7 +78,7 @@ impl SidecarSupervisor {
 
     fn start_python_services(&self) {
         let procs = self.procs.lock().unwrap();
-        if procs.iter().any(|p| p.name == "colbert-service" || p.name == "jina-service" || p.name == "qwen3-service") {
+        if procs.iter().any(|p| p.name == "colbert-service" || p.name == "jina-service") {
             return;
         }
         drop(procs);
@@ -87,7 +87,6 @@ impl SidecarSupervisor {
             info!("found workspace root at {}, starting python embedding services...", root.display());
             self.start_python_service("colbert-service", &root, 11450);
             self.start_python_service("jina-service", &root, 11447);
-            self.start_python_service("qwen3-service", &root, 11502);
         } else {
             warn!("could not locate workspace root, python embedding services will not be started automatically");
         }
