@@ -56,6 +56,38 @@ WHITE=$'\033[1;37m'
 ALERT=$'\033[1;31m'
 RESET=$'\033[0m'
 
+ensure_source_build_tools() {
+  export PATH="${HOME}/.cargo/bin:${HOME}/.local/bin:${PATH}"
+
+  if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+    printf "%b║%b  Rust toolchain not found; installing stable Rust via rustup...%b\n" "${RED}" "${YELLOW}" "${RESET}"
+    if ! command -v curl >/dev/null 2>&1; then
+      printf "ERROR: curl is required to install Rust automatically. Install curl or Rust, then rerun.\n" >&2
+      exit 1
+    fi
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+    export PATH="${HOME}/.cargo/bin:${PATH}"
+  fi
+
+  if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+    printf "ERROR: Rust/Cargo is still unavailable after rustup bootstrap.\n" >&2
+    exit 1
+  fi
+
+  if ! command -v make >/dev/null 2>&1; then
+    printf "ERROR: make is required to build bundled Valkey. Install build-essential or make, then rerun.\n" >&2
+    exit 1
+  fi
+
+  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+    printf "ERROR: a C compiler is required to build bundled Valkey. Install build-essential/gcc or clang, then rerun.\n" >&2
+    exit 1
+  fi
+
+  printf "%b║%b  Source build tools ready: %s | %s%b\n" \
+    "${RED}" "${GREEN}" "$(rustc --version)" "$(cargo --version)" "${RESET}"
+}
+
 play_boot_midi() {
   if [[ "${MASTERD_NO_MUSIC:-0}" == "1" ]]; then
     return 0
@@ -127,6 +159,8 @@ logo_sep
 logo_line "${ALERT}" "  ANARCHY DETECTED. INITIATING FILE DISCIPLINE."
 logo_line "${WHITE}" "  ORGANIZE OR BE ORGANIZED."
 printf "%b╚%s╝%b\n" "${RED}" "${HBAR}" "${RESET}"
+
+ensure_source_build_tools
 
 # ── Model asset install ───────────────────────────────────────────────────
 if [[ "${MASTERD_SKIP_MODEL_DOWNLOAD:-0}" == "1" ]]; then
