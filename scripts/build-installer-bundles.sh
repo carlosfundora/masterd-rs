@@ -180,25 +180,38 @@ BIN_DIR="${ROOT_DIR}/apps/masterd-desktop-tauri/binaries"
 MOD_DIR="${ROOT_DIR}/apps/masterd-desktop-tauri/modules"
 mkdir -p "${BIN_DIR}" "${MOD_DIR}"
 
+validate_meilisearch_binary() {
+  local bin="$1"
+  local desc
+  command -v file >/dev/null 2>&1 || masterd_die "file is required to validate the meilisearch binary architecture"
+  desc="$(file "${bin}")"
+  if [[ "${desc}" != *"${MEILI_EXPECTED_FILE_ARCH}"* ]]; then
+    printf "ERROR: meilisearch binary architecture mismatch for %s: %s\n" "${ARCH}" "${desc}" >&2
+    exit 1
+  fi
+}
+
+validate_valkey_tarball() {
+  tar -tzf "$1" >/dev/null
+}
+
 # Meilisearch v1.8.3 — latest stable
 MEILI_VERSION="v1.8.3"
 MEILI_BIN="${BIN_DIR}/meilisearch"
 if [[ ! -f "${MEILI_BIN}" ]]; then
   printf "%b║%b  Downloading meilisearch %s for %s...%b\n" "${RED}" "${CYAN}" "${MEILI_VERSION}" "${MEILI_PLATFORM}" "${RESET}"
   MEILI_URL="https://github.com/meilisearch/meilisearch/releases/download/${MEILI_VERSION}/meilisearch-${MEILI_PLATFORM}"
-  curl -fsSL "${MEILI_URL}" -o "${MEILI_BIN}"
-  chmod +x "${MEILI_BIN}"
+  MEILI_TMP="${MEILI_BIN}.tmp.$$"
+  rm -f "${MEILI_TMP}"
+  masterd_download_atomic "${MEILI_URL}" "${MEILI_TMP}"
+  chmod +x "${MEILI_TMP}"
+  validate_meilisearch_binary "${MEILI_TMP}"
+  mv "${MEILI_TMP}" "${MEILI_BIN}"
   printf "%b║%b  meilisearch downloaded.%b\n" "${RED}" "${GREEN}" "${RESET}"
 else
   printf "%b║%b  meilisearch already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
 fi
-if command -v file >/dev/null 2>&1; then
-  MEILI_FILE_DESC="$(file "${MEILI_BIN}")"
-  if [[ "${MEILI_FILE_DESC}" != *"${MEILI_EXPECTED_FILE_ARCH}"* ]]; then
-    printf "ERROR: meilisearch binary architecture mismatch for %s: %s\n" "${ARCH}" "${MEILI_FILE_DESC}" >&2
-    exit 1
-  fi
-fi
+validate_meilisearch_binary "${MEILI_BIN}"
 
 # Valkey v7.2.5 — stable release
 VALKEY_VERSION="7.2.5"
@@ -208,8 +221,12 @@ if [[ ! -f "${VALKEY_BIN}" ]]; then
   VALKEY_TMP="${ROOT_DIR}/target/valkey-src"
   mkdir -p "${VALKEY_TMP}"
   VALKEY_TAR="${VALKEY_TMP}/valkey-${VALKEY_VERSION}.tar.gz"
-  if [[ ! -f "${VALKEY_TAR}" ]]; then
-    curl -fsSL "https://github.com/valkey-io/valkey/archive/refs/tags/${VALKEY_VERSION}.tar.gz" -o "${VALKEY_TAR}"
+  if [[ ! -f "${VALKEY_TAR}" ]] || ! validate_valkey_tarball "${VALKEY_TAR}"; then
+    VALKEY_TAR_TMP="${VALKEY_TAR}.tmp.$$"
+    rm -f "${VALKEY_TAR_TMP}"
+    masterd_download_atomic "https://github.com/valkey-io/valkey/archive/refs/tags/${VALKEY_VERSION}.tar.gz" "${VALKEY_TAR_TMP}"
+    validate_valkey_tarball "${VALKEY_TAR_TMP}"
+    mv "${VALKEY_TAR_TMP}" "${VALKEY_TAR}"
   fi
   tar -xzf "${VALKEY_TAR}" -C "${VALKEY_TMP}" --strip-components=1
   (cd "${VALKEY_TMP}" && PATH="/usr/bin:/bin:${PATH}" make RM=/usr/bin/rm -j"${MASTERD_BUILD_JOBS}" 2>&1 | tail -5)
