@@ -61,7 +61,7 @@ vendor/
 
 ### Build tools
 - **Rust** ≥ 1.85 (nightly, see `rust-toolchain.toml`)
-- **Node.js** ≥ 20 + npm
+- **Node.js** >= 20 + pnpm
 - **Tauri CLI** — `cargo install tauri-cli`
 - **curl** or Python `huggingface-hub` — used by `scripts/download-models.sh`
 

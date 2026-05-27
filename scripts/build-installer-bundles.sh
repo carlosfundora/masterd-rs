@@ -198,8 +198,8 @@ else
 fi
 
 # FalkorDB module from official falkordb-bin wheels.
-# MASTERd uses Valkey as the server; the wheel is only used as a stable
-# distribution channel for the Redis-compatible FalkorDB module.
+# MASTERd runs Valkey and FalkorDB as separate local DB processes;
+# the wheel supplies FalkorDB's compatible server binary and module.
 FALKOR_BIN_VERSION="1.4.1"
 FALKOR_SO="${MOD_DIR}/falkordb.so"
 FALKOR_SERVER="${BIN_DIR}/falkordb-server"
