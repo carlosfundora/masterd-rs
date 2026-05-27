@@ -149,11 +149,14 @@ fi
 ARCH="$(uname -m)"
 case "${ARCH}" in
   x86_64|amd64)
+    # AMD Ryzen CPUs report x86_64 and require Meilisearch's linux-amd64 asset.
     MEILI_PLATFORM="linux-amd64"
+    MEILI_EXPECTED_FILE_ARCH="x86-64"
     FALKOR_WHEEL_PLATFORM="manylinux_2_17_x86_64"
     ;;
   aarch64|arm64)
     MEILI_PLATFORM="linux-aarch64"
+    MEILI_EXPECTED_FILE_ARCH="ARM aarch64"
     FALKOR_WHEEL_PLATFORM="manylinux_2_17_aarch64"
     ;;
   *)
@@ -176,6 +179,13 @@ if [[ ! -f "${MEILI_BIN}" ]]; then
   printf "%b║%b  meilisearch downloaded.%b\n" "${RED}" "${GREEN}" "${RESET}"
 else
   printf "%b║%b  meilisearch already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
+fi
+if command -v file >/dev/null 2>&1; then
+  MEILI_FILE_DESC="$(file "${MEILI_BIN}")"
+  if [[ "${MEILI_FILE_DESC}" != *"${MEILI_EXPECTED_FILE_ARCH}"* ]]; then
+    printf "ERROR: meilisearch binary architecture mismatch for %s: %s\n" "${ARCH}" "${MEILI_FILE_DESC}" >&2
+    exit 1
+  fi
 fi
 
 # Valkey v7.2.5 — stable release
