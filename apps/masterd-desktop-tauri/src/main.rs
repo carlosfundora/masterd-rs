@@ -1054,14 +1054,15 @@ async fn preferences_draft_policy(
         return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
     };
 
-    let document_id = request.document_id.clone();
+    let document_id_for_db = request.document_id.clone();
+    let document_id_for_json = request.document_id.clone();
     let goal = request.goal.clone();
     let max_tokens = request.max_tokens;
 
     // Move expensive operations to blocking thread
     let (preferences, document) = tokio::task::spawn_blocking(move || {
         let preferences = store.list_preferences().map_err(|err| err.to_string())?;
-        let document = if let Some(id) = document_id.as_deref() {
+        let document = if let Some(id) = document_id_for_db.as_deref() {
             store.get_document(id).map_err(|err| err.to_string())?
         } else {
             None
@@ -1147,7 +1148,7 @@ Return one JSON object with:
         raw_text,
         parsed,
         provenance: json!({
-            "documentId": document_id,
+            "documentId": document_id_for_json,
             "preferenceCount": preferences.len(),
             "createdAt": now_ts(),
             "reviewGated": true
