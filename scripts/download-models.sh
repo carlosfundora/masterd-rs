@@ -7,7 +7,7 @@
 # Run this after cloning the repo, before building.
 #
 # Usage:
-#   ./scripts/download-models.sh [--skip-chat] [--skip-colbert]
+#   ./scripts/download-models.sh [--skip-chat] [--skip-colbert] [--force] [--verify-only]
 #
 # Requirements:
 #   curl  (already on most Linux systems)
@@ -34,21 +34,66 @@ die()     { printf "%b[download-models] ERROR:%b %s\n" "${RED}" "${RESET}" "$*" 
 SKIP_CHAT="${SKIP_CHAT:-0}"
 SKIP_COLBERT="${SKIP_COLBERT:-0}"
 HF_TOKEN="${HF_TOKEN:-}"
+FORCE="${FORCE:-0}"
+VERIFY_ONLY="${VERIFY_ONLY:-0}"
 
 for arg in "$@"; do
   case "${arg}" in
     --skip-chat)    SKIP_CHAT=1 ;;
     --skip-colbert) SKIP_COLBERT=1 ;;
+    --force)        FORCE=1 ;;
+    --verify-only)  VERIFY_ONLY=1 ;;
     --help|-h)
-      echo "Usage: $0 [--skip-chat] [--skip-colbert]"
+      echo "Usage: $0 [--skip-chat] [--skip-colbert] [--force] [--verify-only]"
       echo "  --skip-chat     Skip downloading chat models (thinking + instruct)"
       echo "  --skip-colbert  Skip downloading ColBERT reranker model"
+      echo "  --force         Re-download files even if they already exist"
+      echo "  --verify-only   Only verify local model files; do not download"
       echo ""
       echo "Set HF_TOKEN env var for gated models:"
       echo "  export HF_TOKEN=hf_your_token_here"
       exit 0 ;;
+    *)
+      die "unknown argument: ${arg}" ;;
   esac
 done
+
+is_lfs_pointer() {
+  local path="$1"
+  [[ -f "${path}" ]] && head -c 128 "${path}" | grep -q "https://git-lfs.github.com/spec/v1"
+}
+
+file_size() {
+  stat -c%s "$1"
+}
+
+verify_file() {
+  local path="$1"
+  local min_bytes="$2"
+  local label="$3"
+
+  if [[ ! -f "${path}" ]]; then
+    die "missing ${label}: ${path}"
+  fi
+  if is_lfs_pointer "${path}"; then
+    die "${label} is a Git LFS pointer, not the real model file: ${path}"
+  fi
+  local size
+  size="$(file_size "${path}")"
+  if (( size < min_bytes )); then
+    die "${label} is too small (${size} bytes, expected at least ${min_bytes}): ${path}"
+  fi
+}
+
+verify_optional_file() {
+  local path="$1"
+  local min_bytes="$2"
+  local label="$3"
+
+  if [[ -f "${path}" ]]; then
+    verify_file "${path}" "${min_bytes}" "${label}"
+  fi
+}
 
 # ── HuggingFace download helper ───────────────────────────────────────────
 # Uses `huggingface-hub` Python package if available, otherwise falls back to
@@ -57,9 +102,17 @@ hf_download() {
   local repo="$1"        # e.g. liquid-ai/LFM2.5-1.2B-Thinking-GGUF
   local filename="$2"    # e.g. LFM2.5-1.2B-Thinking-Q8_0.gguf
   local dest="$3"        # destination file path
+  local min_bytes="$4"   # basic sanity check to reject HTML/errors/pointers
+  local label="$5"
 
-  if [[ -f "${dest}" ]]; then
-    warn "  Already exists, skipping: ${dest}"
+  if [[ -f "${dest}" && "${FORCE}" != "1" ]]; then
+    verify_file "${dest}" "${min_bytes}" "${label}"
+    warn "  Already exists and verified, skipping: ${dest}"
+    return 0
+  fi
+
+  if [[ "${VERIFY_ONLY}" == "1" ]]; then
+    verify_file "${dest}" "${min_bytes}" "${label}"
     return 0
   fi
 
@@ -67,41 +120,46 @@ hf_download() {
   info "  Downloading ${filename} from ${repo}..."
 
   local hf_url="https://huggingface.co/${repo}/resolve/main/${filename}"
-  local curl_auth=""
-  if [[ -n "${HF_TOKEN}" ]]; then
-    curl_auth="-H \"Authorization: Bearer ${HF_TOKEN}\""
-  fi
+  local tmp="${dest}.tmp"
+  /usr/bin/rm -f "${tmp}"
 
   if command -v python3 >/dev/null 2>&1 && python3 -c "import huggingface_hub" 2>/dev/null; then
     # Prefer huggingface-hub for resumable downloads with progress
-    local hf_token_arg=""
-    if [[ -n "${HF_TOKEN}" ]]; then
-      hf_token_arg="--token ${HF_TOKEN}"
-    fi
-    python3 -c "
+    HF_REPO="${repo}" HF_FILE="${filename}" HF_DEST="${dest}" HF_TOKEN="${HF_TOKEN}" python3 - <<'PY'
+import os
+import shutil
+import sys
+from pathlib import Path
 from huggingface_hub import hf_hub_download
+
+repo = os.environ["HF_REPO"]
+filename = os.environ["HF_FILE"]
+dest = Path(os.environ["HF_DEST"])
+token = os.environ.get("HF_TOKEN") or None
+
 path = hf_hub_download(
-    repo_id='${repo}',
-    filename='${filename}',
-    local_dir='$(dirname "${dest}")',
-    ${HF_TOKEN:+token='${HF_TOKEN}',}
+    repo_id=repo,
+    filename=filename,
+    local_dir=str(dest.parent),
+    token=token,
 )
-import shutil, os
-if path != '${dest}':
-    shutil.move(path, '${dest}')
-print('Downloaded to ${dest}')
-"
+if Path(path) != dest:
+    shutil.copy2(path, dest)
+print(f"Downloaded to {dest}")
+PY
   else
     # Fallback: direct curl download
     if [[ -n "${HF_TOKEN}" ]]; then
-      curl -fL --progress-bar \
+      curl -fL --progress-bar --retry 3 --retry-delay 2 \
         -H "Authorization: Bearer ${HF_TOKEN}" \
-        "${hf_url}" -o "${dest}"
+        "${hf_url}" -o "${tmp}"
     else
-      curl -fL --progress-bar "${hf_url}" -o "${dest}"
+      curl -fL --progress-bar --retry 3 --retry-delay 2 "${hf_url}" -o "${tmp}"
     fi
+    mv "${tmp}" "${dest}"
   fi
 
+  verify_file "${dest}" "${min_bytes}" "${label}"
   success "  ${filename} → ${dest}"
 }
 
@@ -116,13 +174,41 @@ if [[ "${SKIP_CHAT}" == "0" ]]; then
   hf_download \
     "liquid-ai/LFM2.5-1.2B-Thinking-GGUF" \
     "LFM2.5-1.2B-Thinking-Q8_0.gguf" \
-    "${ROOT_DIR}/models/lfm2.5-1.2b-thinking/LFM2.5-1.2B-Thinking-Q8_0.gguf"
+    "${ROOT_DIR}/models/lfm2.5-1.2b-thinking/LFM2.5-1.2B-Thinking-Q8_0.gguf" \
+    1000000000 \
+    "LFM2.5-1.2B-Thinking GGUF"
+  hf_download \
+    "liquid-ai/LFM2.5-1.2B-Thinking-GGUF" \
+    "tokenizer.json" \
+    "${ROOT_DIR}/models/lfm2.5-1.2b-thinking/tokenizer.json" \
+    1000000 \
+    "LFM2.5-1.2B-Thinking tokenizer"
+  hf_download \
+    "liquid-ai/LFM2.5-1.2B-Thinking-GGUF" \
+    "tokenizer.chat_template" \
+    "${ROOT_DIR}/models/lfm2.5-1.2b-thinking/tokenizer.chat_template" \
+    100 \
+    "LFM2.5-1.2B-Thinking chat template"
 
   info "── Downloading LFM2.5-350M-Instruct (fast instruct model) ────────────"
   hf_download \
     "liquid-ai/LFM2.5-350M-GGUF" \
     "LFM2.5-350M-Q8_0.gguf" \
-    "${ROOT_DIR}/models/lfm2.5-350m-instruct/LFM2.5-350M-Q8_0.gguf"
+    "${ROOT_DIR}/models/lfm2.5-350m-instruct/LFM2.5-350M-Q8_0.gguf" \
+    300000000 \
+    "LFM2.5-350M-Instruct GGUF"
+  hf_download \
+    "liquid-ai/LFM2.5-350M-GGUF" \
+    "tokenizer.json" \
+    "${ROOT_DIR}/models/lfm2.5-350m-instruct/tokenizer.json" \
+    1000000 \
+    "LFM2.5-350M-Instruct tokenizer"
+  hf_download \
+    "liquid-ai/LFM2.5-350M-GGUF" \
+    "tokenizer.chat_template" \
+    "${ROOT_DIR}/models/lfm2.5-350m-instruct/tokenizer.chat_template" \
+    100 \
+    "LFM2.5-350M-Instruct chat template"
 fi
 
 # ── ColBERT reranker ──────────────────────────────────────────────────────
@@ -131,7 +217,9 @@ if [[ "${SKIP_COLBERT}" == "0" ]]; then
   hf_download \
     "liquid-ai/LFM2-ColBERT-350M-GGUF" \
     "LFM2-ColBERT-350M-Q8_0.gguf" \
-    "${ROOT_DIR}/models/lfm2-colbert-350m/LFM2-ColBERT-350M-Q8_0.gguf"
+    "${ROOT_DIR}/models/lfm2-colbert-350m/LFM2-ColBERT-350M-Q8_0.gguf" \
+    300000000 \
+    "LFM2-ColBERT-350M GGUF"
 fi
 
 # ── Copy models to embedded assets location ───────────────────────────────
@@ -149,10 +237,27 @@ if [[ "${SKIP_CHAT}" == "0" ]]; then
 
   mkdir -p "${THINKING_DST_DIR}" "${INSTRUCT_DST_DIR}"
 
-  [[ -f "${THINKING_SRC}" ]] && cp -v "${THINKING_SRC}" "${THINKING_DST_DIR}/model.gguf"
-  [[ -f "${THINKING_TOK}" ]] && cp -v "${THINKING_TOK}" "${THINKING_DST_DIR}/tokenizer.json"
-  [[ -f "${INSTRUCT_SRC}" ]]  && cp -v "${INSTRUCT_SRC}"  "${INSTRUCT_DST_DIR}/model.gguf"
-  [[ -f "${INSTRUCT_TOK}" ]]  && cp -v "${INSTRUCT_TOK}"  "${INSTRUCT_DST_DIR}/tokenizer.json"
+  verify_file "${THINKING_SRC}" 1000000000 "LFM2.5-1.2B-Thinking GGUF"
+  verify_file "${THINKING_TOK}" 1000000 "LFM2.5-1.2B-Thinking tokenizer"
+  verify_file "${INSTRUCT_SRC}" 300000000 "LFM2.5-350M-Instruct GGUF"
+  verify_file "${INSTRUCT_TOK}" 1000000 "LFM2.5-350M-Instruct tokenizer"
+
+  cp -v "${THINKING_SRC}" "${THINKING_DST_DIR}/model.gguf"
+  cp -v "${THINKING_TOK}" "${THINKING_DST_DIR}/tokenizer.json"
+  cp -v "${INSTRUCT_SRC}" "${INSTRUCT_DST_DIR}/model.gguf"
+  cp -v "${INSTRUCT_TOK}" "${INSTRUCT_DST_DIR}/tokenizer.json"
+
+  verify_file "${THINKING_DST_DIR}/model.gguf" 1000000000 "embedded thinking GGUF"
+  verify_file "${THINKING_DST_DIR}/tokenizer.json" 1000000 "embedded thinking tokenizer"
+  verify_file "${INSTRUCT_DST_DIR}/model.gguf" 300000000 "embedded instruct GGUF"
+  verify_file "${INSTRUCT_DST_DIR}/tokenizer.json" 1000000 "embedded instruct tokenizer"
+fi
+
+if [[ "${SKIP_COLBERT}" == "0" ]]; then
+  verify_file \
+    "${ROOT_DIR}/models/lfm2-colbert-350m/LFM2-ColBERT-350M-Q8_0.gguf" \
+    300000000 \
+    "LFM2-ColBERT-350M GGUF"
 fi
 
 success ""
