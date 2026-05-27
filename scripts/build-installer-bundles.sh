@@ -20,12 +20,13 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-${MASTERD_BUILD_JOBS}}"
 export ROCM_HOME="${ROCM_HOME:-/opt/rocm}"
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
 
-# Force ROCm PyTorch index as the primary extra index for uv and pip.
-# uv reads UV_EXTRA_INDEX_URL; pip reads PIP_EXTRA_INDEX_URL.
-ROCM_TORCH_INDEX_NIGHTLY="https://download.pytorch.org/whl/nightly/rocm6.3"
-ROCM_TORCH_INDEX_STABLE="https://download.pytorch.org/whl/rocm6.2.4"
-export UV_EXTRA_INDEX_URL="${ROCM_TORCH_INDEX_NIGHTLY} ${ROCM_TORCH_INDEX_STABLE}"
-export PIP_EXTRA_INDEX_URL="${ROCM_TORCH_INDEX_NIGHTLY} ${ROCM_TORCH_INDEX_STABLE}"
+# Force one valid ROCm PyTorch index URL for uv and pip. Some uv versions
+# reject a whitespace-separated URL list in UV_EXTRA_INDEX_URL as one malformed
+# URL, so fallback indexes must be passed explicitly at call sites.
+ROCM_TORCH_INDEX_NIGHTLY="${ROCM_TORCH_INDEX_NIGHTLY:-https://download.pytorch.org/whl/nightly/rocm6.3}"
+ROCM_TORCH_INDEX_STABLE="${ROCM_TORCH_INDEX_STABLE:-https://download.pytorch.org/whl/rocm6.2.4}"
+export UV_EXTRA_INDEX_URL="${ROCM_TORCH_INDEX_NIGHTLY}"
+export PIP_EXTRA_INDEX_URL="${ROCM_TORCH_INDEX_NIGHTLY}"
 
 # Block CUDA wheels globally via the project constraints file.
 ROCM_CONSTRAINTS="${ROOT_DIR}/config/rocm-constraints.txt"
