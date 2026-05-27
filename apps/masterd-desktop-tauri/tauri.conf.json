@@ -33,6 +33,11 @@
     "copyright": "Copyright (c) 2026 Carlos Fundora",
     "license": "MIT",
     "licenseFile": "../../LICENSE",
+    "resources": {
+      "binaries/meilisearch": "bin/meilisearch",
+      "binaries/valkey-server": "bin/valkey-server",
+      "modules/falkordb.so": "modules/falkordb.so"
+    },
     "icon": ["icons/icon.png"],
     "linux": {
       "deb": { "depends": [] },
