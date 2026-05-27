@@ -1,8 +1,15 @@
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use masterd_chat_engine::{
+    ChatEngine, ChatEngineConfig, ChatSession, ChatToken, IndexedDocument, Role,
+    SearchMode as ChatSearchMode, ThinkMode as ChatThinkMode,
+};
+use masterd_data::{DataStore, DataStoreConfig, IngestConfig};
 use masterd_embed_engine::EmbeddedEngine;
 use reqwest::blocking::Client;
 use serde::Serialize;
@@ -20,6 +27,18 @@ struct Cli {
     /// Write JSON validation report here.
     #[arg(long, default_value = "data/engine_validation.json")]
     output: String,
+    /// Run the real corpus benchmark (temp ingestion + CPU chat runs).
+    #[arg(long, default_value_t = false)]
+    benchmark: bool,
+    /// Root that contains MASTERd documentation files.
+    #[arg(long, default_value = "/home/local/ai/projects/MASTERd")]
+    docs_root: PathBuf,
+    /// Folder that contains the personal PDF batch.
+    #[arg(long, default_value = "/home/local/Documents/pdf batch")]
+    pdf_root: PathBuf,
+    /// Write the benchmark report here.
+    #[arg(long, default_value = "data/real_benchmarks.json")]
+    benchmark_output: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -29,6 +48,65 @@ struct CheckReport {
     thinking_ok: bool,
     inferred_tokens_per_sec: Option<f64>,
     notes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RealBenchmarkReport {
+    corpus: CorpusReport,
+    ingest: IngestBenchmark,
+    chat: Vec<ChatModelBenchmark>,
+}
+
+#[derive(Debug, Serialize)]
+struct CorpusReport {
+    docs_root: String,
+    pdf_root: String,
+    total_inputs: usize,
+    unique_inputs: usize,
+    duplicate_inputs: usize,
+    doc_inputs: usize,
+    pdf_inputs: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct IngestBenchmark {
+    elapsed_ms: f64,
+    files_per_sec: f64,
+    ms_per_file: f64,
+    duplicate_ops: usize,
+    unique_docs: usize,
+    total_chunks: usize,
+    avg_extracted_chars: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatModelBenchmark {
+    model: String,
+    question_count: usize,
+    accuracy: f64,
+    avg_latency_ms: f64,
+    p95_latency_ms: f64,
+    avg_token_events_per_sec: f64,
+    samples: Vec<ChatQuestionResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatQuestionResult {
+    label: String,
+    question: String,
+    answer: String,
+    expected_keywords: Vec<String>,
+    matched: bool,
+    latency_ms: f64,
+    token_events: usize,
+    token_events_per_sec: f64,
+}
+
+#[derive(Debug, Clone)]
+struct BenchmarkQuestion {
+    label: &'static str,
+    question: &'static str,
+    expected_keywords: &'static [&'static str],
 }
 
 fn main() -> Result<()> {
@@ -47,19 +125,17 @@ fn main() -> Result<()> {
             let sample = vec!["MASTERd engine quick inference check.".to_string()];
             let start = Instant::now();
             let jina = engine.embed_jina(&sample)?;
-            let qwen = engine.embed_qwen3(&sample)?;
             let elapsed = start.elapsed().as_secs_f64();
 
-            if !jina.is_empty() && !qwen.is_empty() && !jina[0].is_empty() && !qwen[0].is_empty() {
+            if !jina.is_empty() && !jina[0].is_empty() {
                 inference_ok = true;
                 let token_estimate = 16.0;
                 if elapsed > 0.0 {
                     inferred_tokens_per_sec = Some(token_estimate / elapsed);
                 }
                 notes.push(format!(
-                    "inference dims: jina={}, qwen3={}",
+                    "inference dims: jina={}",
                     jina[0].len(),
-                    qwen[0].len()
                 ));
             } else {
                 notes.push("inference returned empty embeddings".to_string());
@@ -121,6 +197,15 @@ fn main() -> Result<()> {
     fs::write(&cli.output, serde_json::to_vec_pretty(&report)?)?;
 
     println!("{}", serde_json::to_string_pretty(&report)?);
+
+    if cli.benchmark {
+        let benchmark = run_real_benchmark(&cli)?;
+        if let Some(parent) = std::path::Path::new(&cli.benchmark_output).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&cli.benchmark_output, serde_json::to_vec_pretty(&benchmark)?)?;
+        println!("{}", serde_json::to_string_pretty(&benchmark)?);
+    }
     Ok(())
 }
 

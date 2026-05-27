@@ -10,11 +10,6 @@ name = "colbert-lfm2-305m"
 url = "http://127.0.0.1:11450"
 role = "reranker + token-matrix embed"
 
-[models.qwen3]
-name = "qwen3-embedding"
-url = "http://127.0.0.1:11502"
-role = "dense semantic embed"
-
 [models.jina]
 name = "jina-code-embed"
 url = "http://127.0.0.1:11447"
@@ -24,6 +19,5 @@ role = "dense code/text embed"
 backend = "MASTERD_INFERENCE_BACKEND"
 direct_vector_dim = "MASTERD_DIRECT_VECTOR_DIM"
 colbert_url = "MEMORYBANK_COLBERT_WRAPPER_URL"
-qwen3_url = "MEMORYBANK_QWEN3_URL"
 jina_url = "MEMORYBANK_JINA_URL"
 concurrency = "MEMORYBANK_EMBED_CONCURRENCY"

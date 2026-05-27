@@ -763,15 +763,11 @@ impl DataStore {
             let start = std::time::Instant::now();
             let mut semantic = self.semantic_search(query, per_stage_limit)?;
             stages.push(RetrievalStageTrace {
-                stage: "sqlite_matryoshka_vector".to_string(),
+                stage: "semantic_fusion".to_string(),
                 count: semantic.len(),
                 elapsed_ms: start.elapsed().as_millis() as u64,
-                degraded: self.lancedb.is_none(),
-                message: if self.lancedb.is_some() {
-                    Some("Using live embedding query with SQLite persistence fallback".to_string())
-                } else {
-                    Some("Using SQLite Matryoshka vector fallback".to_string())
-                },
+                degraded: self.lancedb.is_none() && self.embedding.is_none() && self.model2vec.is_none(),
+                message: Some("Merged LanceDB, Jina, and model2vec semantic candidates".to_string()),
             });
             candidates.append(&mut semantic);
         }
@@ -822,7 +818,7 @@ impl DataStore {
             mode,
             top_k,
             lexical_count: stages.iter().find(|s| s.stage.contains("meilisearch")).map(|s| s.count).unwrap_or(0),
-            semantic_count: stages.iter().find(|s| s.stage.contains("sqlite_matryoshka")).map(|s| s.count).unwrap_or(0),
+            semantic_count: stages.iter().filter(|s| s.stage.contains("semantic")).map(|s| s.count).sum(),
             graph_count,
             reranked,
             stages,
@@ -1060,18 +1056,12 @@ impl DataStore {
 
     fn semantic_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
         let jina_query_vector = self.embedding.as_ref().and_then(|client| client.embed_one(query).ok());
-        if let (Some(lancedb), Some(query_vector)) = (
-            &self.lancedb,
-            jina_query_vector.as_ref(),
-        ) {
-            if let Ok(results) = lancedb.search(query_vector, limit) {
-                if !results.is_empty() {
-                    return Ok(results);
-                }
+        let mut out = Vec::new();
+        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref()) {
+            if let Ok(mut results) = lancedb.search(query_vector, limit) {
+                out.append(&mut results);
             }
         }
-
-        let mut out = Vec::new();
         if let Some(mut jina) = self.semantic_search_table("embeddings", "semantic_jina", query, limit, jina_query_vector.as_deref())? {
             out.append(&mut jina);
         }
@@ -1084,6 +1074,71 @@ impl DataStore {
         out.sort_by(|a, b| b.score.total_cmp(&a.score));
         out.truncate(limit);
         Ok(out)
+    }
+
+    pub fn backfill_model2vec_embeddings(&self, batch_size: usize) -> Result<usize> {
+        let Some(client) = &self.model2vec else {
+            return Ok(0);
+        };
+        let batch_size = batch_size.max(1);
+        let mut inserted = 0usize;
+
+        loop {
+            let pending = {
+                let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+                let mut stmt = conn.prepare(
+                    "SELECT c.id, c.document_id, c.chunk_index, c.text, c.token_start, c.token_end, c.text_hash, c.source_stage, c.created_at
+                     FROM chunks c
+                     LEFT JOIN embeddings_model2vec e ON e.chunk_id = c.id
+                     WHERE e.chunk_id IS NULL
+                     ORDER BY c.created_at, c.chunk_index
+                     LIMIT ?1",
+                )?;
+                let rows = stmt.query_map(params![batch_size as i64], row_to_chunk)?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()?
+            };
+
+            if pending.is_empty() {
+                break;
+            }
+
+            let texts = pending.iter().map(|chunk| chunk.text.clone()).collect::<Vec<_>>();
+            let embeddings = client.embed_batch(&texts)?;
+            let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+            let tx = conn.transaction()?;
+            for (chunk, vector) in pending.iter().zip(embeddings.iter()) {
+                let vector_json = serde_json::to_string(vector)?;
+                let vector_hash = sha256_hex(vector_json.as_bytes());
+                let profile = build_matryoshka_profile(&client.model_name, chunk, vector, vector.len());
+                tx.execute(
+                    "INSERT OR REPLACE INTO embeddings_model2vec(
+                        chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
+                        lexical_context, metadata_json, colbert_token_hash, created_at
+                     )
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        chunk.id,
+                        &client.model_name,
+                        vector.len() as i64,
+                        vector_json,
+                        vector_hash,
+                        serde_json::to_string(&profile)?,
+                        profile.lexical_context,
+                        serde_json::to_string(&profile.metadata_context)?,
+                        profile.colbert_token_hash,
+                        now()
+                    ],
+                )?;
+                inserted += 1;
+            }
+            tx.commit()?;
+
+            if pending.len() < batch_size {
+                break;
+            }
+        }
+
+        Ok(inserted)
     }
 
     fn semantic_search_table(

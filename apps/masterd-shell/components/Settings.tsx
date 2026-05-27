@@ -22,7 +22,6 @@ const DEFAULT_CONFIG: AppConfig = {
   embeddingBackend: "http",
   colbertUrl: "http://127.0.0.1:11450",
   jinaUrl: "http://127.0.0.1:11447",
-  qwen3Url: "http://127.0.0.1:11502",
   intakeMaxDepth: 3,
   intakeExtensions: ["txt", "md", "rst", "log", "pdf"],
   ollamaUrl: "http://127.0.0.1:11434",
@@ -222,10 +221,6 @@ export default function Settings({ refreshState }: SettingsProps) {
                 <div className="space-y-1">
                   <label className={label}>Jina Embedding URL</label>
                   <input type="text" value={cfg.jinaUrl} onChange={e => set("jinaUrl", e.target.value)} className={field} />
-                </div>
-                <div className="space-y-1">
-                  <label className={label}>Qwen3 Embedding URL</label>
-                  <input type="text" value={cfg.qwen3Url} onChange={e => set("qwen3Url", e.target.value)} className={field} />
                 </div>
               </div>
             </div>

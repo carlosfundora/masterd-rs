@@ -412,7 +412,6 @@ export type AppConfig = {
   embeddingBackend: string;
   colbertUrl: string;
   jinaUrl: string;
-  qwen3Url: string;
   intakeMaxDepth: number;
   intakeExtensions: string[];
   /** Ollama daemon URL — fallback when embedded engine is unavailable. */
