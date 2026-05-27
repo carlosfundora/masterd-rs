@@ -5,10 +5,12 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
+use model2vec_rs::model::StaticModel;
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tree_sitter::Parser;
 
 pub const DEFAULT_CHUNK_TARGET_TOKENS: usize = 800;
 pub const DEFAULT_CHUNK_OVERLAP_TOKENS: usize = 120;
@@ -229,6 +231,7 @@ pub struct DataStore {
     meili: Option<MeilisearchClient>,
     valkey: Option<redis::Client>,
     embedding: Option<EmbeddingServiceClient>,
+    model2vec: Option<Model2VecClient>,
     reranker: Option<ColbertRerankerClient>,
     lancedb: Option<LanceDbClient>,
     falkordb: Option<FalkorDbClient>,
@@ -241,6 +244,7 @@ pub struct DataStoreConfig {
     pub valkey_url: Option<String>,
     pub embedding_url: Option<String>,
     pub embedding_model: Option<String>,
+    pub model2vec_model: Option<String>,
     pub colbert_url: Option<String>,
     pub lancedb_url: Option<String>,
     pub falkordb_url: Option<String>,
@@ -254,6 +258,7 @@ impl DataStoreConfig {
             valkey_url: Some("redis://127.0.0.1:6399/".to_string()),
             embedding_url: Some("http://127.0.0.1:11447".to_string()),
             embedding_model: Some("jina-omni".to_string()),
+            model2vec_model: Some("minishlab/potion-base-8M".to_string()),
             colbert_url: Some("http://127.0.0.1:11450".to_string()),
             lancedb_url: None,
             falkordb_url: Some("redis://127.0.0.1:6380/".to_string()),
@@ -281,6 +286,16 @@ impl DataStore {
                 .embedding_url
                 .filter(|url| !url.trim().is_empty())
                 .map(|url| EmbeddingServiceClient::new(url, config.embedding_model.unwrap_or_else(|| "jina-omni".to_string()))),
+            model2vec: config
+                .model2vec_model
+                .filter(|model| !model.trim().is_empty())
+                .and_then(|model| match Model2VecClient::new(model.clone()) {
+                    Ok(client) => Some(client),
+                    Err(err) => {
+                        tracing::warn!("model2vec fallback unavailable: {err}");
+                        None
+                    }
+                }),
             reranker: config
                 .colbert_url
                 .filter(|url| !url.trim().is_empty())
@@ -350,6 +365,20 @@ impl DataStore {
             );
 
             CREATE TABLE IF NOT EXISTS embeddings (
+                chunk_id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                dim INTEGER NOT NULL,
+                vector_json TEXT NOT NULL,
+                vector_hash TEXT NOT NULL,
+                matryoshka_json TEXT NOT NULL,
+                lexical_context TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                colbert_token_hash TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS embeddings_model2vec (
                 chunk_id TEXT PRIMARY KEY,
                 provider TEXT NOT NULL,
                 dim INTEGER NOT NULL,
@@ -553,7 +582,7 @@ impl DataStore {
         let mut run_embedding_provider = None;
         let chunks = if let Some(text) = &doc.extracted_text {
             stage_start = std::time::Instant::now();
-            let chunks = chunk_text(&doc.id, &doc.hash, text, DEFAULT_CHUNK_TARGET_TOKENS, DEFAULT_CHUNK_OVERLAP_TOKENS);
+            let chunks = chunk_text(&doc.id, &doc.hash, text, &extension, DEFAULT_CHUNK_TARGET_TOKENS, DEFAULT_CHUNK_OVERLAP_TOKENS);
             self.replace_chunks(&doc, &chunks)?;
             timings.push(stage_timing("chunk", stage_start.elapsed(), "complete"));
 
@@ -1030,32 +1059,57 @@ impl DataStore {
     }
 
     fn semantic_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
-        let live_query_vector = self
-            .embedding
-            .as_ref()
-            .and_then(|client| client.embed_one(query).ok());
-        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, live_query_vector.as_ref()) {
+        let jina_query_vector = self.embedding.as_ref().and_then(|client| client.embed_one(query).ok());
+        if let (Some(lancedb), Some(query_vector)) = (
+            &self.lancedb,
+            jina_query_vector.as_ref(),
+        ) {
             if let Ok(results) = lancedb.search(query_vector, limit) {
                 if !results.is_empty() {
                     return Ok(results);
                 }
             }
         }
+
+        let mut out = Vec::new();
+        if let Some(mut jina) = self.semantic_search_table("embeddings", "semantic_jina", query, limit, jina_query_vector.as_deref())? {
+            out.append(&mut jina);
+        }
+        if self.model2vec.is_some() {
+            let model2vec_query = self.model2vec.as_ref().and_then(|client| client.embed_one(query).ok());
+            if let Some(mut model2vec) = self.semantic_search_table("embeddings_model2vec", "semantic_model2vec", query, limit, model2vec_query.as_deref())? {
+                out.append(&mut model2vec);
+            }
+        }
+        out.sort_by(|a, b| b.score.total_cmp(&a.score));
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    fn semantic_search_table(
+        &self,
+        table: &str,
+        source_stage: &str,
+        query: &str,
+        limit: usize,
+        query_vector: Option<&[f32]>,
+    ) -> Result<Option<Vec<RetrievalCandidate>>> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT c.id, c.document_id, d.current_name, d.current_path, c.text, e.vector_json
-             FROM embeddings e
+             FROM {table} e
              JOIN chunks c ON c.id = e.chunk_id
-             JOIN documents d ON d.id = c.document_id",
-        )?;
+             JOIN documents d ON d.id = c.document_id"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let mut rows = stmt.query([])?;
         let mut out = Vec::new();
         while let Some(row) = rows.next()? {
             let vector_json: String = row.get(5)?;
             let vector: Vec<f32> = serde_json::from_str(&vector_json).unwrap_or_default();
             let fallback_qvec;
-            let qvec = if let Some(live) = live_query_vector.as_ref() {
-                live.as_slice()
+            let qvec = if let Some(query_vector) = query_vector {
+                query_vector
             } else {
                 fallback_qvec = hashed_embedding(query, vector.len().max(DEFAULT_EMBED_DIM));
                 fallback_qvec.as_slice()
@@ -1067,39 +1121,45 @@ impl DataStore {
                 path: row.get(3)?,
                 text: row.get(4)?,
                 score: coarse_to_fine_similarity(qvec, &vector),
-                source_stage: "semantic_matryoshka".to_string(),
+                source_stage: source_stage.to_string(),
             });
         }
         out.sort_by(|a, b| b.score.total_cmp(&a.score));
         out.truncate(limit);
-        Ok(out)
+        Ok(if out.is_empty() { None } else { Some(out) })
     }
 
     fn write_embeddings(&self, chunks: &[DocumentChunk]) -> Result<String> {
-        let live_embeddings = self
-            .embedding
-            .as_ref()
-            .and_then(|client| {
-                let texts = chunks.iter().map(|chunk| chunk.text.clone()).collect::<Vec<_>>();
-                client.embed_batch(&texts).ok()
-            });
-        let provider = live_embeddings
+        let texts = chunks.iter().map(|chunk| chunk.text.clone()).collect::<Vec<_>>();
+        let jina_embeddings = self.embedding.as_ref().and_then(|client| client.embed_batch(&texts).ok());
+        let model2vec_embeddings = self.model2vec.as_ref().and_then(|client| client.embed_batch(&texts).ok());
+        let jina_provider = jina_embeddings
             .as_ref()
             .and_then(|batch| batch.first())
             .map(|embedding| embedding.provider.clone())
             .unwrap_or_else(|| "direct-hash".to_string());
+        let model2vec_provider = self
+            .model2vec
+            .as_ref()
+            .map(|client| client.model_name.clone())
+            .unwrap_or_else(|| "model2vec-rs".to_string());
+        let provider = if model2vec_embeddings.is_some() {
+            format!("{jina_provider}+{model2vec_provider}")
+        } else {
+            jina_provider.clone()
+        };
         let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let tx = conn.transaction()?;
         let mut lance_records = Vec::new();
         for (index, chunk) in chunks.iter().enumerate() {
-            let vector = live_embeddings
+            let jina_vector = jina_embeddings
                 .as_ref()
                 .and_then(|batch| batch.get(index))
                 .map(|embedding| embedding.vector.clone())
                 .unwrap_or_else(|| hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM));
-            let vector_json = serde_json::to_string(&vector)?;
-            let vector_hash = sha256_hex(vector_json.as_bytes());
-            let profile = build_matryoshka_profile(&provider, chunk, &vector, vector.len());
+            let jina_vector_json = serde_json::to_string(&jina_vector)?;
+            let jina_vector_hash = sha256_hex(jina_vector_json.as_bytes());
+            let jina_profile = build_matryoshka_profile(&jina_provider, chunk, &jina_vector, jina_vector.len());
             tx.execute(
                 "INSERT OR REPLACE INTO embeddings(
                     chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
@@ -1108,14 +1168,14 @@ impl DataStore {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     chunk.id,
-                    provider,
-                    vector.len() as i64,
-                    vector_json,
-                    vector_hash,
-                    serde_json::to_string(&profile)?,
-                    profile.lexical_context,
-                    serde_json::to_string(&profile.metadata_context)?,
-                    profile.colbert_token_hash,
+                    jina_provider,
+                    jina_vector.len() as i64,
+                    jina_vector_json,
+                    jina_vector_hash,
+                    serde_json::to_string(&jina_profile)?,
+                    jina_profile.lexical_context,
+                    serde_json::to_string(&jina_profile.metadata_context)?,
+                    jina_profile.colbert_token_hash,
                     now()
                 ],
             )?;
@@ -1123,9 +1183,37 @@ impl DataStore {
                 id: chunk.id.clone(),
                 document_id: chunk.document_id.clone(),
                 text: chunk.text.clone(),
-                vector,
-                metadata: profile.metadata_context,
+                vector: jina_vector,
+                metadata: jina_profile.metadata_context,
             });
+
+            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref() {
+                if let Some(embedding) = model2vec_embeddings.get(index) {
+                    let vector = embedding.clone();
+                    let vector_json = serde_json::to_string(&vector)?;
+                    let vector_hash = sha256_hex(vector_json.as_bytes());
+                    let profile = build_matryoshka_profile(&model2vec_provider, chunk, &vector, vector.len());
+                    tx.execute(
+                        "INSERT OR REPLACE INTO embeddings_model2vec(
+                            chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
+                            lexical_context, metadata_json, colbert_token_hash, created_at
+                         )
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        params![
+                            chunk.id,
+                            &model2vec_provider,
+                            vector.len() as i64,
+                            vector_json,
+                            vector_hash,
+                            serde_json::to_string(&profile)?,
+                            profile.lexical_context,
+                            serde_json::to_string(&profile.metadata_context)?,
+                            profile.colbert_token_hash,
+                            now()
+                        ],
+                    )?;
+                }
+            }
         }
         tx.commit()?;
         if let Some(lancedb) = &self.lancedb {
@@ -1430,33 +1518,76 @@ pub fn chunk_text(
     document_id: &str,
     document_hash: &str,
     text: &str,
+    extension: &str,
     target_tokens: usize,
     overlap_tokens: usize,
 ) -> Vec<DocumentChunk> {
-    let parts = chunk_by_semantic_token_budget(text, target_tokens, overlap_tokens);
-    if parts.is_empty() {
+    let sections = document_sections(text, extension);
+    if sections.is_empty() {
         return vec![];
     }
     let created_at = now();
-    parts
+    sections
         .into_iter()
+        .flat_map(|(section_stage, section_text)| {
+            chunk_by_semantic_token_budget(&section_text, target_tokens, overlap_tokens)
+                .into_iter()
+                .map(move |(chunk_text, token_start, token_end)| (section_stage.clone(), chunk_text, token_start, token_end))
+        })
         .enumerate()
-        .map(|(index, (chunk_text, token_start, token_end))| {
-        let text_hash = sha256_hex(chunk_text.as_bytes());
+        .map(|(index, (section_stage, chunk_text, token_start, token_end))| {
+            let text_hash = sha256_hex(chunk_text.as_bytes());
             let id = stable_id("chunk", format!("{document_hash}:{index}:{text_hash}").as_bytes());
             DocumentChunk {
-            id,
-            document_id: document_id.to_string(),
+                id,
+                document_id: document_id.to_string(),
                 chunk_index: index,
-            text: chunk_text,
+                text: chunk_text,
                 token_start,
                 token_end,
-            text_hash,
-            source_stage: "extract_text".to_string(),
-            created_at: created_at.clone(),
+                text_hash,
+                source_stage: section_stage,
+                created_at: created_at.clone(),
             }
         })
         .collect()
+}
+
+fn document_sections(text: &str, extension: &str) -> Vec<(String, String)> {
+    if extension == "rs" {
+        if let Some(sections) = rust_structured_sections(text) {
+            if !sections.is_empty() {
+                return sections.into_iter().map(|section| ("ast_section".to_string(), section)).collect();
+            }
+        }
+    }
+    semantic_units(text)
+        .into_iter()
+        .map(|section| ("semantic_section".to_string(), section))
+        .collect()
+}
+
+fn rust_structured_sections(text: &str) -> Option<Vec<String>> {
+    let mut parser = Parser::new();
+    parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok()?;
+    let tree = parser.parse(text, None)?;
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    let mut sections = Vec::new();
+    for child in root.named_children(&mut cursor) {
+        if matches!(
+            child.kind(),
+            "function_item" | "struct_item" | "enum_item" | "trait_item" | "impl_item" | "mod_item" | "type_item" | "const_item" | "static_item" | "use_declaration"
+        ) {
+            if let Ok(snippet) = child.utf8_text(text.as_bytes()) {
+                let snippet = snippet.trim();
+                if !snippet.is_empty() {
+                    sections.push(snippet.to_string());
+                }
+            }
+        }
+    }
+    Some(sections)
 }
 
 fn rrf_merge_candidates(candidates: Vec<RetrievalCandidate>, top_k: usize) -> Vec<RetrievalCandidate> {
@@ -1995,6 +2126,37 @@ impl EmbeddingServiceClient {
                 StoredEmbedding { vector, provider: provider.clone() }
             })
             .collect())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Model2VecClient {
+    model_name: String,
+    model: Arc<StaticModel>,
+}
+
+impl Model2VecClient {
+    fn new(model_name: String) -> Result<Self> {
+        let model = StaticModel::from_pretrained(&model_name, None, None, None)?;
+        Ok(Self {
+            model_name,
+            model: Arc::new(model),
+        })
+    }
+
+    fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
+        Ok(self
+            .embed_batch(&[text.to_string()])?
+            .into_iter()
+            .next()
+            .unwrap_or_default())
+    }
+
+    fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(self.model.encode(texts))
     }
 }
 
@@ -2613,8 +2775,8 @@ mod tests {
     #[test]
     fn chunk_ids_are_stable() {
         let text = (0..2200).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
-        let a = chunk_text("doc1", "hash1", &text, 800, 120);
-        let b = chunk_text("doc1", "hash1", &text, 800, 120);
+        let a = chunk_text("doc1", "hash1", &text, "txt", 800, 120);
+        let b = chunk_text("doc1", "hash1", &text, "txt", 800, 120);
         assert_eq!(a.len(), 4);
         assert_eq!(a.iter().map(|c| &c.id).collect::<Vec<_>>(), b.iter().map(|c| &c.id).collect::<Vec<_>>());
         assert_eq!(a[1].token_start, 680);
@@ -2644,6 +2806,7 @@ mod tests {
         config.meilisearch_url = None;
         config.valkey_url = None;
         config.embedding_url = None;
+        config.model2vec_model = None;
         config.colbert_url = None;
         config.lancedb_url = None;
         config.falkordb_url = None;
@@ -2660,6 +2823,7 @@ mod tests {
         config.meilisearch_url = None;
         config.valkey_url = None;
         config.embedding_url = None;
+        config.model2vec_model = None;
         config.colbert_url = None;
         config.lancedb_url = None;
         config.falkordb_url = None;
@@ -2688,6 +2852,7 @@ mod tests {
         config.meilisearch_url = None;
         config.valkey_url = None;
         config.embedding_url = None;
+        config.model2vec_model = None;
         config.colbert_url = None;
         config.lancedb_url = None;
         config.falkordb_url = None;
