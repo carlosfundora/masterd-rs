@@ -6,3 +6,4 @@
 *.ico   -diff -text
 *.woff  -diff -text
 *.woff2 -diff -text
+*.gguf filter=lfs diff=lfs merge=lfs -text
