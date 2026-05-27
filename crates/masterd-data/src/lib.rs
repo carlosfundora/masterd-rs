@@ -206,6 +206,20 @@ pub struct ReviewItem {
     pub resolved: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEntry {
+    pub id: String,
+    pub document_id: Option<String>,
+    pub action: String,
+    pub actor: String,
+    pub summary: String,
+    pub before: Option<serde_json::Value>,
+    pub after: Option<serde_json::Value>,
+    pub reversible: bool,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct DataStore {
     db_path: PathBuf,
@@ -572,6 +586,17 @@ impl DataStore {
             .map_err(Into::into)
     }
 
+    pub fn update_document_tags(&self, id: &str, tags: &[String]) -> Result<Option<DocumentRecord>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        conn.execute(
+            "UPDATE documents SET tags_json = ?1, updated_at = ?2 WHERE id = ?3",
+            params![serde_json::to_string(tags)?, now(), id],
+        )?;
+        drop(conn);
+        self.write_audit(id, "tagged", "user", "Document tags updated", true)?;
+        self.get_document(id)
+    }
+
     pub fn find_document_by_hash(&self, hash: &str) -> Result<Option<DocumentRecord>> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.query_row("SELECT * FROM documents WHERE hash = ?1", params![hash], row_to_document)
@@ -756,6 +781,40 @@ impl DataStore {
         )
         .optional()
         .map_err(Into::into)
+    }
+
+    pub fn list_audit_entries(&self, limit: usize, offset: usize) -> Result<Vec<AuditEntry>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, document_id, action, actor, summary, before_json, after_json, reversible, created_at
+             FROM audit_entries ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit as i64, offset as i64], row_to_audit)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn audit_entries_for_document(&self, document_id: &str) -> Result<Vec<AuditEntry>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, document_id, action, actor, summary, before_json, after_json, reversible, created_at
+             FROM audit_entries WHERE document_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![document_id], row_to_audit)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn get_retrieval_trace(&self, id: &str) -> Result<Option<RetrievalTrace>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let trace_json: Option<String> = conn
+            .query_row(
+                "SELECT trace_json FROM retrieval_traces WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        trace_json
+            .map(|json| serde_json::from_str(&json).map_err(Into::into))
+            .transpose()
     }
 
     fn lexical_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
@@ -1303,6 +1362,22 @@ fn row_to_preference(row: &rusqlite::Row<'_>) -> rusqlite::Result<LearnedPrefere
         evidence_count: row.get::<_, i64>(6)? as usize,
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
+    })
+}
+
+fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEntry> {
+    let before_json: Option<String> = row.get(5)?;
+    let after_json: Option<String> = row.get(6)?;
+    Ok(AuditEntry {
+        id: row.get(0)?,
+        document_id: row.get(1)?,
+        action: row.get(2)?,
+        actor: row.get(3)?,
+        summary: row.get(4)?,
+        before: before_json.and_then(|json| serde_json::from_str(&json).ok()),
+        after: after_json.and_then(|json| serde_json::from_str(&json).ok()),
+        reversible: row.get::<_, i64>(7)? != 0,
+        created_at: row.get(8)?,
     })
 }
 

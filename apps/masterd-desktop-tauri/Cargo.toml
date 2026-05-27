@@ -25,6 +25,7 @@ masterd-sidecars = { path = "../../crates/masterd-sidecars" }
 masterd-runtime-tune = { path = "../../crates/masterd-runtime-tune" }
 masterd-chat-engine  = { path = "../../crates/masterd-chat-engine" }
 masterd-index        = { path = "../../crates/masterd-index" }
+masterd-data         = { path = "../../crates/masterd-data" }
 
 tauri        = { path = "../../vendor/tauri/crates/tauri", features = [] }
 tauri-macros = { path = "../../vendor/tauri/crates/tauri-macros" }

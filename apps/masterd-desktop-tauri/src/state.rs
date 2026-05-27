@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use masterd_chat_engine::{ChatEngine, ChatEngineConfig, ChatSession};
+use masterd_data::{DataStore, DataStoreConfig};
 
 // ── Persistent user configuration ────────────────────────────────────────────
 
@@ -198,6 +199,8 @@ pub struct AppState {
     pub config: Arc<Mutex<AppConfig>>,
     /// Resolved at startup; None in unit-test contexts.
     pub dirs: std::sync::Mutex<Option<Arc<AppDirs>>>,
+    /// Canonical SQLite-backed document/retrieval/preference store.
+    pub data_store: std::sync::Mutex<Option<DataStore>>,
 }
 
 impl AppState {
@@ -210,6 +213,7 @@ impl AppState {
             intake_queue:  Arc::new(Mutex::new(Vec::new())),
             config:        Arc::new(Mutex::new(AppConfig::default())),
             dirs:          std::sync::Mutex::new(None),
+            data_store:    std::sync::Mutex::new(None),
         }
     }
 
@@ -242,6 +246,25 @@ impl AppState {
             if let Ok(snapshot) = IndexSnapshot::from_json(&json) {
                 self.chat_engine.restore_index(snapshot).await;
                 tracing::info!("Restored BM25 index from disk");
+            }
+        }
+
+        let restored_config = self.config.lock().await.clone();
+        match DataStore::open(DataStoreConfig {
+            db_path: dirs.user_data.join("masterd.sqlite"),
+            meilisearch_url: Some("http://127.0.0.1:7700".to_string()),
+            valkey_url: Some("redis://127.0.0.1:6399/".to_string()),
+        }) {
+            Ok(store) => {
+                tracing::info!(
+                    db = %store.db_path().display(),
+                    searxng = %restored_config.searxng_url,
+                    "Canonical MASTERd data store opened"
+                );
+                *self.data_store.lock().unwrap() = Some(store);
+            }
+            Err(err) => {
+                tracing::error!("Failed to open canonical MASTERd data store: {err}");
             }
         }
 

@@ -7,6 +7,7 @@ mod sidecars;
 use state::AppState;
 use sidecars::SidecarSupervisor;
 use masterd_chat_engine::ChatToken;
+use masterd_data::{DataStore, IngestConfig, PreferenceEvent, SearchMode as DataSearchMode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
@@ -28,6 +29,19 @@ pub struct ApiError { pub code: String, pub message: String, pub recoverable: bo
 
 fn ok<T: Serialize>(data: T) -> ApiResult<T> {
     ApiResult::Ok { ok: true, data, request_id: Uuid::new_v4().to_string(), received_at: now_ts() }
+}
+
+fn err_result<T: Serialize>(code: impl Into<String>, message: impl Into<String>, recoverable: bool) -> ApiResult<T> {
+    ApiResult::Err {
+        ok: false,
+        error: ApiError { code: code.into(), message: message.into(), recoverable },
+        request_id: Uuid::new_v4().to_string(),
+        received_at: now_ts(),
+    }
+}
+
+fn data_store(state: &State<'_, AppState>) -> Option<DataStore> {
+    state.data_store.lock().ok().and_then(|store| store.clone())
 }
 
 fn now_ts() -> String {
@@ -118,6 +132,12 @@ pub struct PipelineJob {
     pub error_message: Option<String>,
     pub worker_id: Option<String>,
     pub logs: Vec<serde_json::Value>,
+    pub stage_timings: Vec<masterd_data::StageTiming>,
+    pub retryable: bool,
+    pub indexed_chunk_count: usize,
+    pub ocr_confidence: Option<f32>,
+    pub embedding_provider: Option<String>,
+    pub rerank_status: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -404,6 +424,107 @@ fn empty_pipeline_job(document_id: String) -> PipelineJob {
         error_message: None,
         worker_id: None,
         logs: vec![],
+        stage_timings: vec![],
+        retryable: false,
+        indexed_chunk_count: 0,
+        ocr_confidence: None,
+        embedding_provider: None,
+        rerank_status: "not_run".into(),
+    }
+}
+
+fn map_document(doc: masterd_data::DocumentRecord) -> DocumentRecord {
+    DocumentRecord {
+        id: doc.id,
+        original_name: doc.original_name,
+        current_name: doc.current_name,
+        suggested_name: doc.suggested_name,
+        original_path: doc.original_path,
+        current_path: doc.current_path,
+        extension: doc.extension,
+        mime_type: doc.mime_type,
+        size_bytes: doc.size_bytes,
+        hash: doc.hash,
+        classification: doc.classification.map(|classification| ClassificationResult {
+            category: classification.category,
+            confidence: classification.confidence,
+        }),
+        tags: doc.tags,
+        extracted_text: doc.extracted_text,
+        summary: doc.summary,
+        confidence: doc.confidence,
+        duplicate_status: doc.duplicate_status,
+        processing_status: doc.processing_status,
+        created_at: doc.created_at,
+        updated_at: doc.updated_at,
+    }
+}
+
+fn map_pipeline_run(run: masterd_data::PipelineRun) -> PipelineJob {
+    let file_name = std::path::Path::new(&run.file_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&run.file_path)
+        .to_string();
+    let failed_stage = run.failure.as_ref().map(|failure| failure.stage.clone());
+    PipelineJob {
+        id: run.id,
+        document_id: run.document_id.unwrap_or_default(),
+        file_name,
+        stage: failed_stage
+            .or_else(|| run.stage_timings.last().map(|stage| stage.stage.clone()))
+            .unwrap_or_else(|| "complete".to_string()),
+        status: run.status.clone(),
+        progress: if run.status == "complete" || run.status == "duplicate" { 100 } else { 0 },
+        started_at: Some(run.created_at.clone()),
+        finished_at: Some(run.updated_at.clone()),
+        error_message: run.failure.as_ref().map(|failure| failure.message.clone()),
+        worker_id: Some("local-data-store".into()),
+        logs: run
+            .stage_timings
+            .iter()
+            .map(|stage| json!({
+                "id": format!("{}:{}", run.id, stage.stage),
+                "level": if stage.status == "complete" { "info" } else { "warning" },
+                "message": format!("{} {}", stage.stage, stage.status),
+                "createdAt": run.updated_at,
+                "details": { "elapsedMs": stage.elapsed_ms }
+            }))
+            .collect(),
+        stage_timings: run.stage_timings,
+        retryable: run.retryable,
+        indexed_chunk_count: run.indexed_chunk_count,
+        ocr_confidence: run.ocr_confidence,
+        embedding_provider: run.embedding_provider,
+        rerank_status: run.rerank_status,
+    }
+}
+
+fn map_review(item: masterd_data::ReviewItem) -> ReviewItem {
+    ReviewItem {
+        id: item.id,
+        document_id: item.document_id,
+        reason: item.reason,
+        severity: item.severity,
+        title: item.title,
+        explanation: item.explanation,
+        proposed_action: item.proposed_action,
+        created_at: item.created_at,
+        resolved: item.resolved,
+    }
+}
+
+fn map_audit(entry: masterd_data::AuditEntry) -> AuditEntry {
+    AuditEntry {
+        id: entry.id,
+        document_id: entry.document_id,
+        action: entry.action,
+        actor: entry.actor,
+        summary: entry.summary,
+        before: entry.before,
+        after: entry.after,
+        reversible: entry.reversible,
+        created_at: entry.created_at,
     }
 }
 

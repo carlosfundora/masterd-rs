@@ -30,6 +30,7 @@ import WelcomeTour from "../components/WelcomeTour";
 
 export default function Home() {
   const [bridge, setBridge] = useState<MasterdFrontendBridge | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [initLoaded, setInitLoaded] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -97,23 +98,30 @@ export default function Home() {
     let cancelled = false;
 
     const initBoot = async () => {
-      const b = await getBridge();
-      if (cancelled) return;
-      setBridge(b);
-      await refreshState(b);
-      if (cancelled) return;
-      setInitLoaded(true);
+      try {
+        const b = await getBridge();
+        if (cancelled) return;
+        setBridge(b);
+        await refreshState(b);
+        if (cancelled) return;
+        setInitLoaded(true);
 
-      // Subscribe to backend events
-      unsubscribe = b.events.subscribe(() => refreshState(b));
+        // Subscribe to backend events
+        unsubscribe = b.events.subscribe(() => refreshState(b));
 
-      // Hardware telemetry every 3 seconds
-      telemetryInterval = setInterval(async () => {
-        const healthRes = await b.system.getHealth();
-        if (healthRes.ok) setHealth(healthRes.data);
-        const statusRes = await b.system.getStatus();
-        if (statusRes.ok) setStatus(statusRes.data);
-      }, 3000);
+        // Hardware telemetry every 3 seconds
+        telemetryInterval = setInterval(async () => {
+          const healthRes = await b.system.getHealth();
+          if (healthRes.ok) setHealth(healthRes.data);
+          const statusRes = await b.system.getStatus();
+          if (statusRes.ok) setStatus(statusRes.data);
+        }, 3000);
+      } catch (err) {
+        if (!cancelled) {
+          setRuntimeError(err instanceof Error ? err.message : "MASTERd requires the live Tauri desktop runtime.");
+          setInitLoaded(true);
+        }
+      }
     };
 
     initBoot();
@@ -146,6 +154,20 @@ export default function Home() {
   const pendingReviewCount = reviewQueue.filter(r => !r.resolved).length;
 
   return (
+    runtimeError ? (
+      <main className="min-h-screen bg-[var(--masterd-bg)] text-[var(--masterd-text)] flex items-center justify-center p-6">
+        <div className="max-w-lg w-full bg-[var(--masterd-surface)] border border-[var(--masterd-border)] rounded-[8px] p-6 space-y-3">
+          <div className="text-xs uppercase tracking-[0.2em] text-[#fca5a5] font-mono">Live runtime required</div>
+          <h1 className="text-2xl font-semibold text-[#f4f4f5]">MASTERd needs the desktop backend</h1>
+          <p className="text-sm text-[#a1a1aa]">
+            {runtimeError}
+          </p>
+          <p className="text-xs text-[#71717a] font-mono">
+            Launch with <span className="text-[#fca5a5]">pnpm dev</span> or <span className="text-[#fca5a5]">cargo tauri dev</span>.
+          </p>
+        </div>
+      </main>
+    ) : (
     <main id="app-root" className="min-h-screen bg-[var(--masterd-bg)] text-[var(--masterd-text)] flex overflow-hidden font-sans select-none selection:bg-[#7f1d1d] selection:text-white">
       
       {/* Navigation Sidebar Panel */}
@@ -427,5 +449,6 @@ export default function Home() {
         onBack={() => setTutorialStep((s) => Math.max(s - 1, 0))}
       />
     </main>
+    )
   );
 }
