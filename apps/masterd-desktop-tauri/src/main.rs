@@ -1009,7 +1009,7 @@ async fn preferences_record_event(
             value: event.value,
             source: event.source.unwrap_or_else(|| "desktop".to_string()),
             confidence: event.confidence.unwrap_or(0.75).clamp(0.0, 1.0),
-            created_at: chrono_like_now(),
+            created_at: now_ts(),
         })
         .map_err(|err| err.to_string())?;
     Ok(ok(learned))
@@ -1273,7 +1273,11 @@ async fn index_document(
 pub enum ChatStreamToken {
     Think { text: String },
     Response { text: String },
-    Done { citations: Vec<ChatCitation> },
+    Done {
+        citations: Vec<ChatCitation>,
+        #[serde(rename = "retrievalTrace", skip_serializing_if = "Option::is_none")]
+        retrieval_trace: Option<masterd_data::RetrievalTrace>,
+    },
     Error { message: String },
 }
 
@@ -1303,6 +1307,44 @@ async fn chat_send_message(
         "Both"      => SearchMode::Both,
         _           => SearchMode::LocalDocuments,
     };
+    let data_search_mode = match searchMode.as_str() {
+        "WebSearch" => None,
+        "Semantic" => Some(DataSearchMode::Semantic),
+        "Lexical" => Some(DataSearchMode::Lexical),
+        _ => Some(DataSearchMode::Hybrid),
+    };
+    let mut local_citations = Vec::new();
+    let mut retrieval_trace = None;
+    let mut message_for_generation = message;
+    if let (Some(store), Some(mode)) = (data_store(&state), data_search_mode) {
+        let query = message_for_generation.clone();
+        let top_k = state.config.lock().await.rag_top_k.max(1);
+        if let Ok(trace) = tokio::task::spawn_blocking(move || store.search(&query, mode, top_k))
+            .await
+            .map_err(|err| err.to_string())?
+        {
+            if !trace.results.is_empty() {
+                let mut context = String::from("[CANONICAL LOCAL CONTEXT]\n");
+                for (index, candidate) in trace.results.iter().enumerate() {
+                    context.push_str(&format!(
+                        "[{}] {} ({}) score:{:.4} stage:{}\n{}\n",
+                        index + 1,
+                        candidate.title,
+                        candidate.path,
+                        candidate.score,
+                        candidate.source_stage,
+                        candidate.text
+                    ));
+                    local_citations.push(ChatCitation {
+                        title: candidate.title.clone(),
+                        url: format!("file://{}", candidate.path),
+                    });
+                }
+                message_for_generation = format!("{context}\n[USER QUESTION]\n{message_for_generation}");
+            }
+            retrieval_trace = Some(trace);
+        }
+    }
 
     let event_name = format!("masterd://chat/{channelId}");
     let (tx, mut rx) = mpsc::channel::<ChatToken>(128);
@@ -1321,7 +1363,7 @@ async fn chat_send_message(
                 .clone()
         };
         let mut session = session_snapshot;
-        if let Err(e) = engine.chat(&mut session, message, think_mode, search_mode, tx).await {
+        if let Err(e) = engine.chat(&mut session, message_for_generation, think_mode, search_mode, tx).await {
             tracing::error!("chat engine error: {e}");
         }
         let _ = session_done_tx.send((gen_session_id, session));
@@ -1330,14 +1372,21 @@ async fn chat_send_message(
     // Spawn event relay: forward tokens to frontend, then persist updated session.
     let relay_sessions = state.sessions.clone();
     let ev = event_name.clone();
+    let done_local_citations = local_citations;
+    let done_retrieval_trace = retrieval_trace;
     tokio::spawn(async move {
         while let Some(token) = rx.recv().await {
             let payload = match token {
                 ChatToken::Think(t)    => ChatStreamToken::Think { text: t },
                 ChatToken::Response(t) => ChatStreamToken::Response { text: t },
-                ChatToken::Done { citations, .. } => ChatStreamToken::Done {
-                    citations: citations.into_iter().map(|c| ChatCitation { title: c.title, url: c.url }).collect(),
-                },
+                ChatToken::Done { citations, .. } => {
+                    let mut merged_citations = done_local_citations.clone();
+                    merged_citations.extend(citations.into_iter().map(|c| ChatCitation { title: c.title, url: c.url }));
+                    ChatStreamToken::Done {
+                        citations: merged_citations,
+                        retrieval_trace: done_retrieval_trace.clone(),
+                    }
+                }
             };
             let _ = app.emit(&ev, payload);
         }
@@ -1406,6 +1455,8 @@ fn main() {
             review_list, review_resolve,
             rules_list, rules_get_by_id, rules_create, rules_update, rules_delete, rules_test,
             audit_list, audit_get_for_document, audit_revert,
+            preferences_list, preferences_record_event, preferences_approve, preferences_dismiss,
+            retrieval_explain,
             chat_send_message,
         ])
         .build(tauri::generate_context!())

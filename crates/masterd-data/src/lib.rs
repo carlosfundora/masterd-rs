@@ -1685,6 +1685,7 @@ fn semantic_units(text: &str) -> Vec<String> {
     units
 }
 
+#[allow(dead_code)]
 fn mean_pool_token_matrix(token_matrix: &[Vec<f32>]) -> Vec<f32> {
     if token_matrix.is_empty() {
         return vec![];
@@ -1709,6 +1710,7 @@ fn mean_pool_token_matrix(token_matrix: &[Vec<f32>]) -> Vec<f32> {
     mean
 }
 
+#[allow(dead_code)]
 fn token_matrix_hash(token_matrix: &[Vec<f32>]) -> String {
     let mut bytes = Vec::new();
     for token in token_matrix {
