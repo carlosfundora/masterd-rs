@@ -46,6 +46,17 @@ PYTHON_BIN="${PYTHON_BIN:-python3.12}"
 TARGET_SERVICE="${TARGET_SERVICE:-all}"
 PREFETCH_MODELS="${PREFETCH_MODELS:-1}"
 
+RED=$'\033[38;5;196m'
+GREEN=$'\033[38;5;46m'
+CYAN=$'\033[38;5;51m'
+YELLOW=$'\033[38;5;226m'
+RESET=$'\033[0m'
+
+info()    { printf "%b[setup-embed]%b %s\n" "${CYAN}"  "${RESET}" "$*"; }
+success() { printf "%b[setup-embed]%b %s\n" "${GREEN}" "${RESET}" "$*"; }
+warn()    { printf "%b[setup-embed]%b %s\n" "${YELLOW}" "${RESET}" "$*"; }
+die()     { printf "%b[setup-embed] ERROR:%b %s\n" "${RED}" "${RESET}" "$*" >&2; exit 1; }
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --service)
@@ -80,16 +91,10 @@ EOF
   esac
 done
 
-RED=$'\033[38;5;196m'
-GREEN=$'\033[38;5;46m'
-CYAN=$'\033[38;5;51m'
-YELLOW=$'\033[38;5;226m'
-RESET=$'\033[0m'
-
-info()    { printf "%b[setup-embed]%b %s\n" "${CYAN}"  "${RESET}" "$*"; }
-success() { printf "%b[setup-embed]%b %s\n" "${GREEN}" "${RESET}" "$*"; }
-warn()    { printf "%b[setup-embed]%b %s\n" "${YELLOW}" "${RESET}" "$*"; }
-die()     { printf "%b[setup-embed] ERROR:%b %s\n" "${RED}" "${RESET}" "$*" >&2; exit 1; }
+case "${TARGET_SERVICE}" in
+  colbert|jina|qwen3|all) ;;
+  *) die "unknown service: ${TARGET_SERVICE}. Use colbert, jina, qwen3, or all." ;;
+esac
 
 # Validate environment before touching anything.
 command -v uv >/dev/null 2>&1    || die "uv not found. Install via: curl -LsSf https://astral.sh/uv/install.sh | sh"
