@@ -1,0 +1,25 @@
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "MASTERd Local Search"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "127.0.0.1"
+  port: 9265
+  secret_key: "MASTERd local development secret; installer rewrites this"
+  limiter: false
+  image_proxy: false
+
+outgoing:
+  request_timeout: 3.0
+  max_request_timeout: 8.0
+  pool_connections: 20
+  pool_maxsize: 20
