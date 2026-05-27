@@ -103,6 +103,11 @@ export default function Home() {
       await refreshState(b);
       if (cancelled) return;
       setInitLoaded(true);
+      if (typeof window !== "undefined") {
+        const seen = window.localStorage.getItem("masterd:onboarding:v1-complete");
+        setTutorialOpen(!seen);
+        setTutorialStep(0);
+      }
 
       // Subscribe to backend events
       unsubscribe = b.events.subscribe(() => refreshState(b));
@@ -123,13 +128,6 @@ export default function Home() {
       if (telemetryInterval) clearInterval(telemetryInterval);
     };
   }, [refreshState]);
-
-  useEffect(() => {
-    if (!initLoaded || typeof window === "undefined") return;
-    const seen = window.localStorage.getItem("masterd:onboarding:v1-complete");
-    setTutorialOpen(!seen);
-    setTutorialStep(0);
-  }, [initLoaded]);
 
   const closeTutorial = useCallback(() => {
     if (typeof window !== "undefined") {
