@@ -14,4 +14,4 @@ masterd-embed-engine = { path = "../../crates/masterd-embed-engine" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync"] }
+tokio.workspace = true

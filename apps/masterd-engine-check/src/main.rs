@@ -6,7 +6,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use clap::Parser;
 use masterd_chat_engine::{
-    ChatEngine, ChatEngineConfig, ChatSession, ChatToken, IndexedDocument, Role,
+    ChatEngine, ChatEngineConfig, ChatSession, ChatToken, IndexedDocument,
     SearchMode as ChatSearchMode, ThinkMode as ChatThinkMode,
 };
 use masterd_data::{DataStore, DataStoreConfig, IngestConfig};
