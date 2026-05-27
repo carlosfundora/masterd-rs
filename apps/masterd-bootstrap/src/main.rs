@@ -84,9 +84,15 @@ fn run_command(name: &str, program: &str, args: &[&str]) -> Result<()> {
         .args(args)
         .spawn()
         .with_context(|| format!("Failed to spawn command for {}", name))?;
-    let status = child.wait().with_context(|| format!("Failed to wait for {}", name))?;
+    let status = child
+        .wait()
+        .with_context(|| format!("Failed to wait for {}", name))?;
     if !status.success() {
-        anyhow::bail!("Phase '{}' failed with exit code: {:?}", name, status.code());
+        anyhow::bail!(
+            "Phase '{}' failed with exit code: {:?}",
+            name,
+            status.code()
+        );
     }
     println!("=== [bootstrap-rust] Phase: {} [OK] ===\n", name);
     Ok(())
@@ -94,19 +100,25 @@ fn run_command(name: &str, program: &str, args: &[&str]) -> Result<()> {
 
 fn run_installation_flow() -> Result<()> {
     println!("Initializing MASTERd recursive installer...");
-    
+
     // Phase 1: System packages & Rust toolchain validation (via install-bootstrap.sh)
     run_command(
         "System Dependencies & Source Build Tools",
         "bash",
-        &["-c", "source scripts/lib/install-bootstrap.sh && masterd_ensure_source_build_tools ."],
+        &[
+            "-c",
+            "source scripts/lib/install-bootstrap.sh && masterd_ensure_source_build_tools .",
+        ],
     )?;
 
     // Phase 2: Node.js & pnpm setup
     run_command(
         "Node.js & pnpm Package Manager",
         "bash",
-        &["-c", "source scripts/lib/install-bootstrap.sh && masterd_ensure_pnpm ."],
+        &[
+            "-c",
+            "source scripts/lib/install-bootstrap.sh && masterd_ensure_pnpm .",
+        ],
     )?;
 
     // Phase 3: Model Downloads

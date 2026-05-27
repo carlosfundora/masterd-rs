@@ -26,7 +26,8 @@ impl PromptRegistry {
         let identity = AgentProfile {
             key: "masterd".to_string(),
             display_name: "MASTERd".to_string(),
-            one_liner: "Severe, overconfident code enforcer and architecture disciplinarian.".to_string(),
+            one_liner: "Severe, overconfident code enforcer and architecture disciplinarian."
+                .to_string(),
             prompt: identity_prompt.to_string(),
         };
 
@@ -36,7 +37,9 @@ impl PromptRegistry {
             AgentProfile {
                 key: "masterd".to_string(),
                 display_name: "MASTERd".to_string(),
-                one_liner: "Kernel-level architect, code enforcer, and auditor with absolute confidence.".to_string(),
+                one_liner:
+                    "Kernel-level architect, code enforcer, and auditor with absolute confidence."
+                        .to_string(),
                 prompt: identity.prompt.clone(),
             },
         );

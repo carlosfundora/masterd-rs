@@ -18,4 +18,3 @@ thiserror.workspace = true
 tracing.workspace = true
 tree-sitter.workspace = true
 tree-sitter-rust.workspace = true
-model2vec-rs = { path = "../model2vec-rs" }

@@ -122,7 +122,12 @@ impl LocalIndex {
             self.bm25 = None;
             return;
         }
-        self.bm25 = Some(BM25Okapi::new(self.tokenized_documents.clone(), None, None, None));
+        self.bm25 = Some(BM25Okapi::new(
+            self.tokenized_documents.clone(),
+            None,
+            None,
+            None,
+        ));
     }
 
     /// BM25 full-text search. Returns top-k results sorted by score descending.

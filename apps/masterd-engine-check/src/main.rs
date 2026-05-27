@@ -139,10 +139,7 @@ fn main() -> Result<()> {
                 if elapsed > 0.0 {
                     inferred_tokens_per_sec = Some(token_estimate / elapsed);
                 }
-                notes.push(format!(
-                    "inference dims: jina={}",
-                    jina[0].len(),
-                ));
+                notes.push(format!("inference dims: jina={}", jina[0].len(),));
             } else {
                 notes.push("inference returned empty embeddings".to_string());
             }
@@ -209,7 +206,10 @@ fn main() -> Result<()> {
         if let Some(parent) = std::path::Path::new(&cli.benchmark_output).parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&cli.benchmark_output, serde_json::to_vec_pretty(&benchmark)?)?;
+        fs::write(
+            &cli.benchmark_output,
+            serde_json::to_vec_pretty(&benchmark)?,
+        )?;
         println!("{}", serde_json::to_string_pretty(&benchmark)?);
     }
     Ok(())
@@ -293,7 +293,11 @@ struct BenchmarkDoc {
     text: String,
 }
 
-fn build_benchmark_corpus(docs_root: &Path, pdf_root: &Path, pdf_limit: usize) -> Result<BenchmarkCorpus> {
+fn build_benchmark_corpus(
+    docs_root: &Path,
+    pdf_root: &Path,
+    pdf_limit: usize,
+) -> Result<BenchmarkCorpus> {
     let mut inputs = Vec::new();
 
     let doc_candidates = [
@@ -312,7 +316,14 @@ fn build_benchmark_corpus(docs_root: &Path, pdf_root: &Path, pdf_limit: usize) -
         .with_context(|| format!("failed to read pdf root {}", pdf_root.display()))?
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .filter(|path| path.is_file() && path.extension().and_then(|ext| ext.to_str()).map(|ext| ext.eq_ignore_ascii_case("pdf")).unwrap_or(false))
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("pdf"))
+                    .unwrap_or(false)
+        })
         .collect::<Vec<_>>();
     pdf_candidates.sort();
     pdf_candidates.truncate(pdf_limit.max(1));
@@ -431,7 +442,11 @@ fn benchmark_ingest(inputs: &[PathBuf]) -> Result<IngestBenchmark> {
             if outcome.run.status != "duplicate" {
                 unique_docs += 1;
                 total_chunks += outcome.run.indexed_chunk_count;
-                total_chars += doc.extracted_text.as_deref().map(|text| text.len()).unwrap_or(0);
+                total_chars += doc
+                    .extracted_text
+                    .as_deref()
+                    .map(|text| text.len())
+                    .unwrap_or(0);
             }
         }
     }
@@ -496,9 +511,15 @@ fn benchmark_questions() -> Vec<BenchmarkQuestion> {
     ]
 }
 
-fn benchmark_chat_models(unique_docs: &[BenchmarkDoc], question_limit: usize) -> Result<Vec<ChatModelBenchmark>> {
+fn benchmark_chat_models(
+    unique_docs: &[BenchmarkDoc],
+    question_limit: usize,
+) -> Result<Vec<ChatModelBenchmark>> {
     let rt = tokio::runtime::Runtime::new()?;
-    let questions = benchmark_questions().into_iter().take(question_limit.max(1)).collect::<Vec<_>>();
+    let questions = benchmark_questions()
+        .into_iter()
+        .take(question_limit.max(1))
+        .collect::<Vec<_>>();
     let mut chat_engine_cfg = ChatEngineConfig::default();
     chat_engine_cfg.max_new_tokens = 64;
     chat_engine_cfg.temperature = 0.2;
@@ -528,14 +549,14 @@ fn benchmark_chat_models(unique_docs: &[BenchmarkDoc], question_limit: usize) ->
     ] {
         let mut samples = Vec::new();
         for question in &questions {
-            samples.push(rt.block_on(run_chat_question(
-                Arc::clone(&engine),
-                question,
-                mode,
-            ))?);
+            samples.push(rt.block_on(run_chat_question(Arc::clone(&engine), question, mode))?);
         }
-        let latencies = samples.iter().map(|sample| sample.latency_ms).collect::<Vec<_>>();
-        let accuracy = samples.iter().filter(|sample| sample.matched).count() as f64 / samples.len().max(1) as f64;
+        let latencies = samples
+            .iter()
+            .map(|sample| sample.latency_ms)
+            .collect::<Vec<_>>();
+        let accuracy = samples.iter().filter(|sample| sample.matched).count() as f64
+            / samples.len().max(1) as f64;
         let avg_latency_ms = latencies.iter().sum::<f64>() / latencies.len().max(1) as f64;
         let p95_latency_ms = percentile(&latencies, 0.95);
         let avg_token_events_per_sec = samples

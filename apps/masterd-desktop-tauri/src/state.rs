@@ -250,8 +250,9 @@ impl AppState {
         let mut data_config = DataStoreConfig::local(dirs.user_data.join("masterd.sqlite"));
         data_config.embedding_url = Some(restored_config.jina_url.clone());
         data_config.colbert_url = Some(restored_config.colbert_url.clone());
-        match DataStore::open(data_config) {
-            Ok(store) => {
+        let store_result = tokio::task::spawn_blocking(move || DataStore::open(data_config)).await;
+        match store_result {
+            Ok(Ok(store)) => {
                 tracing::info!(
                     db = %store.db_path().display(),
                     searxng = %restored_config.searxng_url,
@@ -259,16 +260,20 @@ impl AppState {
                 );
                 let backfill_store = store.clone();
                 *self.data_store.lock().unwrap() = Some(store);
-                std::thread::spawn(move || {
-                    match backfill_store.backfill_model2vec_embeddings(128) {
-                        Ok(count) if count > 0 => tracing::info!("Backfilled {count} model2vec embeddings"),
-                        Ok(_) => tracing::info!("model2vec embeddings already up to date"),
-                        Err(err) => tracing::warn!("model2vec backfill failed: {err}"),
+                std::thread::spawn(move || match backfill_store.backfill_model2vec_embeddings(128)
+                {
+                    Ok(count) if count > 0 => {
+                        tracing::info!("Backfilled {count} model2vec embeddings")
                     }
+                    Ok(_) => tracing::info!("model2vec embeddings already up to date"),
+                    Err(err) => tracing::warn!("model2vec backfill failed: {err}"),
                 });
             }
-            Err(err) => {
+            Ok(Err(err)) => {
                 tracing::error!("Failed to open canonical MASTERd data store: {err}");
+            }
+            Err(err) => {
+                tracing::error!("Failed to join canonical MASTERd data store opener: {err}");
             }
         }
 

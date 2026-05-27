@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
-use model2vec_rs::model::StaticModel;
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -244,6 +243,7 @@ pub struct DataStoreConfig {
     pub valkey_url: Option<String>,
     pub embedding_url: Option<String>,
     pub embedding_model: Option<String>,
+    pub model2vec_url: Option<String>,
     pub model2vec_model: Option<String>,
     pub colbert_url: Option<String>,
     pub lancedb_url: Option<String>,
@@ -258,6 +258,7 @@ impl DataStoreConfig {
             valkey_url: Some("redis://127.0.0.1:6399/".to_string()),
             embedding_url: Some("http://127.0.0.1:11447".to_string()),
             embedding_model: Some("jina-omni".to_string()),
+            model2vec_url: Some("http://127.0.0.1:11448".to_string()),
             model2vec_model: Some("minishlab/potion-base-8M".to_string()),
             colbert_url: Some("http://127.0.0.1:11450".to_string()),
             lancedb_url: None,
@@ -287,15 +288,15 @@ impl DataStore {
                 .filter(|url| !url.trim().is_empty())
                 .map(|url| EmbeddingServiceClient::new(url, config.embedding_model.unwrap_or_else(|| "jina-omni".to_string()))),
             model2vec: config
-                .model2vec_model
-                .filter(|model| !model.trim().is_empty())
-                .and_then(|model| match Model2VecClient::new(model.clone()) {
-                    Ok(client) => Some(client),
-                    Err(err) => {
-                        tracing::warn!("model2vec fallback unavailable: {err}");
-                        None
-                    }
-                }),
+                .model2vec_url
+                .filter(|url| !url.trim().is_empty())
+                .map(|url| Model2VecClient::new(
+                    url,
+                    config
+                        .model2vec_model
+                        .filter(|model| !model.trim().is_empty())
+                        .unwrap_or_else(|| "minishlab/potion-base-8M".to_string()),
+                )),
             reranker: config
                 .colbert_url
                 .filter(|url| !url.trim().is_empty())
@@ -2186,17 +2187,21 @@ impl EmbeddingServiceClient {
 
 #[derive(Debug, Clone)]
 struct Model2VecClient {
+    base_url: String,
     model_name: String,
-    model: Arc<StaticModel>,
+    client: Client,
 }
 
 impl Model2VecClient {
-    fn new(model_name: String) -> Result<Self> {
-        let model = StaticModel::from_pretrained(&model_name, None, None, None)?;
-        Ok(Self {
+    fn new(base_url: String, model_name: String) -> Self {
+        Self {
+            base_url,
             model_name,
-            model: Arc::new(model),
-        })
+            client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
+        }
     }
 
     fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
@@ -2211,8 +2216,49 @@ impl Model2VecClient {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(self.model.encode(texts))
+        let url = format!("{}/v1/embeddings", self.base_url.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(&serde_json::json!({
+                "input": texts,
+                "model": self.model_name,
+            }))
+            .send()?;
+        if !response.status().is_success() {
+            anyhow::bail!("model2vec service failed: HTTP {}", response.status());
+        }
+        parse_model2vec_embedding_response(response.json()?, texts.len())
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct Model2VecEmbeddingDatum {
+    embedding: Vec<f32>,
+    #[serde(default)]
+    index: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Model2VecEmbeddingResponse {
+    #[serde(default)]
+    embeddings: Option<Vec<Vec<f32>>>,
+    #[serde(default)]
+    data: Option<Vec<Model2VecEmbeddingDatum>>,
+}
+
+fn parse_model2vec_embedding_response(
+    body: Model2VecEmbeddingResponse,
+    expected_len: usize,
+) -> Result<Vec<Vec<f32>>> {
+    let mut vectors = if let Some(mut data) = body.data {
+        data.sort_by_key(|datum| datum.index.unwrap_or(usize::MAX));
+        data.into_iter().map(|datum| datum.embedding).collect::<Vec<_>>()
+    } else {
+        body.embeddings.unwrap_or_default()
+    };
+    vectors.truncate(expected_len);
+    Ok(vectors)
 }
 
 #[derive(Debug, Clone)]
@@ -2854,6 +2900,35 @@ mod tests {
     }
 
     #[test]
+    fn model2vec_parser_accepts_embeddings_shape() {
+        let body = serde_json::from_value::<Model2VecEmbeddingResponse>(serde_json::json!({
+            "embeddings": [[1.0, 2.0], [3.0, 4.0]],
+            "model": "fixture-model"
+        }))
+        .unwrap();
+
+        let vectors = parse_model2vec_embedding_response(body, 2).unwrap();
+
+        assert_eq!(vectors, vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
+    }
+
+    #[test]
+    fn model2vec_parser_accepts_openai_data_shape() {
+        let body = serde_json::from_value::<Model2VecEmbeddingResponse>(serde_json::json!({
+            "data": [
+                {"embedding": [3.0, 4.0], "index": 1, "object": "embedding"},
+                {"embedding": [1.0, 2.0], "index": 0, "object": "embedding"}
+            ],
+            "model": "fixture-model"
+        }))
+        .unwrap();
+
+        let vectors = parse_model2vec_embedding_response(body, 2).unwrap();
+
+        assert_eq!(vectors, vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
+    }
+
+    #[test]
     fn migrations_record_version() {
         let path = std::env::temp_dir().join(format!("masterd-data-test-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&path);
@@ -2861,6 +2936,7 @@ mod tests {
         config.meilisearch_url = None;
         config.valkey_url = None;
         config.embedding_url = None;
+        config.model2vec_url = None;
         config.model2vec_model = None;
         config.colbert_url = None;
         config.lancedb_url = None;
@@ -2878,6 +2954,7 @@ mod tests {
         config.meilisearch_url = None;
         config.valkey_url = None;
         config.embedding_url = None;
+        config.model2vec_url = None;
         config.model2vec_model = None;
         config.colbert_url = None;
         config.lancedb_url = None;
@@ -2907,6 +2984,7 @@ mod tests {
         config.meilisearch_url = None;
         config.valkey_url = None;
         config.embedding_url = None;
+        config.model2vec_url = None;
         config.model2vec_model = None;
         config.colbert_url = None;
         config.lancedb_url = None;
