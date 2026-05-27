@@ -1,11 +1,10 @@
 use std::{env, net::SocketAddr, sync::Arc};
 
 use axum::{
+    Json, Router,
     extract::State,
     http::StatusCode,
-    response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
 use model2vec_rs::model::StaticModel;
 use serde::{Deserialize, Serialize};
@@ -58,9 +57,9 @@ struct EmbedResponse {
     object: &'static str,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let model_name = env::var("MODEL2VEC_MODEL").unwrap_or_else(|_| "minishlab/potion-base-8M".to_string());
+fn main() -> anyhow::Result<()> {
+    let model_name =
+        env::var("MODEL2VEC_MODEL").unwrap_or_else(|_| "minishlab/potion-base-8M".to_string());
     let port = env::var("MODEL2VEC_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -69,15 +68,23 @@ async fn main() -> anyhow::Result<()> {
 
     println!("loading model2vec model: {model_name}");
     let model = StaticModel::from_pretrained(&model_name, None, None, None)?;
+    let state = AppState {
+        model: Arc::new(model),
+        model_name,
+    };
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(run_server(addr, state))
+}
+
+async fn run_server(addr: SocketAddr, state: AppState) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/embed", post(embed))
         .route("/v1/embeddings", post(embed))
-        .with_state(AppState {
-            model: Arc::new(model),
-            model_name,
-        });
+        .with_state(state);
 
     println!("model2vec-service listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -113,7 +120,10 @@ async fn embed(
     }
 
     let embeddings = state.model.encode(&texts);
-    let dim = embeddings.first().map(|embedding| embedding.len()).unwrap_or(0);
+    let dim = embeddings
+        .first()
+        .map(|embedding| embedding.len())
+        .unwrap_or(0);
     let data = embeddings
         .iter()
         .enumerate()
@@ -134,5 +144,10 @@ async fn embed(
 }
 
 fn bad_request(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
-    (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: message.into() }))
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
 }
