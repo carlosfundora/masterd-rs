@@ -1,1 +1,28 @@
 @import "tailwindcss";
+
+:root {
+  --masterd-bg: #09090b;
+  --masterd-surface: #111113;
+  --masterd-surface-2: #18181b;
+  --masterd-border: #27272a;
+  --masterd-accent: #b91c1c;
+  --masterd-accent-strong: #991b1b;
+  --masterd-text: #f4f4f5;
+  --masterd-muted: #a1a1aa;
+  --masterd-smoke: #71717a;
+}
+
+html,
+body {
+  background: var(--masterd-bg);
+  color: var(--masterd-text);
+}
+
+body {
+  color-scheme: dark;
+}
+
+::selection {
+  background: rgba(185, 28, 28, 0.35);
+  color: #fff;
+}

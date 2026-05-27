@@ -26,12 +26,15 @@ import Rules from "../components/Rules";
 import AuditLog from "../components/AuditLog";
 import SettingsScreen from "../components/Settings";
 import ChatPanel from "../components/ChatPanel";
+import WelcomeTour from "../components/WelcomeTour";
 
 export default function Home() {
   const [bridge, setBridge] = useState<MasterdFrontendBridge | null>(null);
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [initLoaded, setInitLoaded] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
 
   // Synced system variables
   const [status, setStatus] = useState<SystemStatus | null>(null);
@@ -121,6 +124,25 @@ export default function Home() {
     };
   }, [refreshState]);
 
+  useEffect(() => {
+    if (!initLoaded || typeof window === "undefined") return;
+    const seen = window.localStorage.getItem("masterd:onboarding:v1-complete");
+    setTutorialOpen(!seen);
+    setTutorialStep(0);
+  }, [initLoaded]);
+
+  const closeTutorial = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("masterd:onboarding:v1-complete", "true");
+    }
+    setTutorialOpen(false);
+  }, []);
+
+  const replayTutorial = useCallback(() => {
+    setTutorialStep(0);
+    setTutorialOpen(true);
+  }, []);
+
   const activeWatchFolders: WatchFolder[] = watchFolders.length > 0 ? watchFolders : [
     { id: "wf-1", path: "/Users/username/Desktop/Tax2025", enabled: true, profileId: "Receipts & Financial Docs", fileCount: 28, createdAt: "" },
     { id: "wf-2", path: "/Users/username/Downloads/Invoices", enabled: true, profileId: "Fast Scan", fileCount: 114, createdAt: "" },
@@ -131,19 +153,19 @@ export default function Home() {
   const pendingReviewCount = reviewQueue.filter(r => !r.resolved).length;
 
   return (
-    <main id="app-root" className="min-h-screen bg-[#05070A] text-[#E6F7FF] flex overflow-hidden font-sans select-none selection:bg-[#00E5FF] selection:text-black">
+    <main id="app-root" className="min-h-screen bg-[var(--masterd-bg)] text-[var(--masterd-text)] flex overflow-hidden font-sans select-none selection:bg-[#7f1d1d] selection:text-white">
       
       {/* Navigation Sidebar Panel */}
-      <aside id="app-sidebar" className="w-60 bg-[#0B1018] border-r border-[#183040] hidden md:flex flex-col justify-between shrink-0 z-20">
+      <aside id="app-sidebar" className="w-60 bg-[var(--masterd-surface)] border-r border-[var(--masterd-border)] hidden md:flex flex-col justify-between shrink-0 z-20">
         <div>
-          <div className="p-5 flex items-center gap-3 border-b border-[#183040]">
-            <div className="w-6 h-6 border border-[#00E5FF] shadow-[0_0_8px_rgba(0,229,255,0.4)] flex items-center justify-center text-[10px] font-mono font-bold text-[#00E5FF] bg-[#00E5FF]/10 rounded-[4px]">M</div>
-            <span className="font-semibold tracking-[0.2em] text-xs text-[#00E5FF] font-mono">MASTERD</span>
+          <div className="p-5 flex items-center gap-3 border-b border-[var(--masterd-border)]">
+            <div className="w-6 h-6 border border-[#7f1d1d] shadow-[0_0_8px_rgba(127,29,29,0.35)] flex items-center justify-center text-[10px] font-mono font-bold text-[#fca5a5] bg-[#7f1d1d]/15 rounded-[4px]">M</div>
+            <span className="font-semibold tracking-[0.2em] text-xs text-[#fca5a5] font-mono">MASTERD</span>
           </div>
 
           <div className="p-4 space-y-6">
             <div>
-              <span className="text-[10px] text-[#6C8798] uppercase tracking-[0.16em] font-mono px-3">Primary Areas</span>
+              <span className="text-[10px] text-[var(--masterd-smoke)] uppercase tracking-[0.16em] font-mono px-3">Primary Areas</span>
               <div className="space-y-1 mt-2.5">
                 {[
                   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -160,8 +182,8 @@ export default function Home() {
                     }}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-[4px] cursor-pointer text-xs font-semibold uppercase tracking-wider transition-all border-r-2 ${
                       activeTab === item.id 
-                        ? "bg-[#101827] text-[#00E5FF] border-[#00E5FF] shadow-[0_0_8px_rgba(0,229,255,0.05)]" 
-                        : "text-[#A7C7D9] hover:text-[#00E5FF] hover:bg-[#101827]/40 border-transparent"
+                        ? "bg-[#18181b] text-[#fca5a5] border-[#b91c1c] shadow-[0_0_8px_rgba(127,29,29,0.12)]" 
+                        : "text-[#a1a1aa] hover:text-[#fca5a5] hover:bg-[#18181b]/70 border-transparent"
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
@@ -169,7 +191,7 @@ export default function Home() {
                       <span className="text-[11px]">{item.label}</span>
                     </div>
                     {item.count ? (
-                      <span className="bg-[#00E5FF]/15 text-[#00E5FF] text-[9.5px] font-mono font-bold px-1.5 py-0.2 rounded-[2px] shadow-[0_0_4px_rgba(0,229,255,0.2)]">
+                      <span className="bg-[#7f1d1d]/20 text-[#fca5a5] text-[9.5px] font-mono font-bold px-1.5 py-0.2 rounded-[2px] shadow-[0_0_4px_rgba(127,29,29,0.2)]">
                         {item.count}
                       </span>
                     ) : null}
@@ -179,7 +201,7 @@ export default function Home() {
             </div>
 
             <div>
-              <span className="text-[10px] text-[#6C8798] uppercase tracking-[0.16em] font-mono px-3">Triage & Supervision</span>
+              <span className="text-[10px] text-[var(--masterd-smoke)] uppercase tracking-[0.16em] font-mono px-3">Triage & Supervision</span>
               <div className="space-y-1 mt-2.5">
                 {[
                   { id: "review", label: "Review Queue", icon: <ShieldAlert className="w-4 h-4" />, count: pendingReviewCount, alert: pendingReviewCount > 0 },
@@ -190,8 +212,8 @@ export default function Home() {
                     onClick={() => setActiveTab(item.id)}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-[4px] cursor-pointer text-xs font-semibold uppercase tracking-wider transition-all border-r-2 ${
                       activeTab === item.id 
-                        ? "bg-[#101827] text-[#00E5FF] border-[#00E5FF] shadow-[0_0_8px_rgba(0,229,255,0.05)]" 
-                        : "text-[#A7C7D9] hover:text-[#00E5FF] hover:bg-[#101827]/40 border-transparent"
+                        ? "bg-[#18181b] text-[#fca5a5] border-[#b91c1c] shadow-[0_0_8px_rgba(127,29,29,0.12)]" 
+                        : "text-[#a1a1aa] hover:text-[#fca5a5] hover:bg-[#18181b]/70 border-transparent"
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
@@ -211,14 +233,14 @@ export default function Home() {
             </div>
 
             <div>
-              <span className="text-[10px] text-[#6C8798] uppercase tracking-[0.16em] font-mono px-3">System Settings</span>
+              <span className="text-[10px] text-[var(--masterd-smoke)] uppercase tracking-[0.16em] font-mono px-3">System Settings</span>
               <div className="space-y-1 mt-2.5">
                 <button
                   onClick={() => setActiveTab("settings")}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-[4px] cursor-pointer text-xs font-semibold uppercase tracking-wider transition-all border-r-2 ${
                     activeTab === "settings" 
-                      ? "bg-[#101827] text-[#00E5FF] border-[#00E5FF] shadow-[0_0_8px_rgba(0,229,255,0.05)]" 
-                      : "text-[#A7C7D9] hover:text-[#00E5FF] hover:bg-[#101827]/40 border-transparent"
+                      ? "bg-[#18181b] text-[#fca5a5] border-[#b91c1c] shadow-[0_0_8px_rgba(127,29,29,0.12)]" 
+                      : "text-[#a1a1aa] hover:text-[#fca5a5] hover:bg-[#18181b]/70 border-transparent"
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
@@ -232,18 +254,18 @@ export default function Home() {
         </div>
 
         {/* User badge */}
-        <div className="p-4 border-t border-[#183040] flex flex-col gap-2 bg-[#0B1018]">
+        <div className="p-4 border-t border-[var(--masterd-border)] flex flex-col gap-2 bg-[var(--masterd-surface)]">
           <div className="flex items-center gap-2.5 px-1">
-            <div className="w-8 h-8 rounded-[4px] bg-[#3B82F6]/10 border border-[#3B82F6]/20 flex items-center justify-center font-mono font-bold text-xs text-[#00E5FF] shadow-[0_0_6px_rgba(0,229,255,0.1)]">
+            <div className="w-8 h-8 rounded-[4px] bg-[#7f1d1d]/10 border border-[#7f1d1d]/20 flex items-center justify-center font-mono font-bold text-xs text-[#fca5a5] shadow-[0_0_6px_rgba(127,29,29,0.12)]">
               SE
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-semibold text-[#E6F7FF] truncate">sentseven@gmail.com</div>
-              <div className="text-[9px] uppercase font-mono text-[#6C8798]">Supervisor Level</div>
+              <div className="text-[11px] font-semibold text-[#f4f4f5] truncate">sentseven@gmail.com</div>
+              <div className="text-[9px] uppercase font-mono text-[var(--masterd-smoke)]">Supervisor Level</div>
             </div>
           </div>
 
-          <div className="bg-[#05070A] p-2.5 border border-[#183040] rounded-[4px] flex items-center justify-between text-[10px] text-[#6C8798] font-mono">
+          <div className="bg-[#09090b] p-2.5 border border-[var(--masterd-border)] rounded-[4px] flex items-center justify-between text-[10px] text-[var(--masterd-smoke)] font-mono">
             <span className="flex items-center gap-1">
               <Lock className="w-3 h-3 text-green-500" /> Sandboxed
             </span>
@@ -256,38 +278,38 @@ export default function Home() {
       <div className="flex-grow flex min-w-0 overflow-hidden">
 
         {/* Main workspace column */}
-        <div className={`flex flex-col min-w-0 bg-[#05070A] relative overflow-hidden transition-all duration-300 ${chatOpen ? "flex-[2]" : "flex-1"}`}>
+        <div className={`flex flex-col min-w-0 bg-[var(--masterd-bg)] relative overflow-hidden transition-all duration-300 ${chatOpen ? "flex-[2]" : "flex-1"}`}>
           
           {/* Futuristic grid background */}
-          <div className="absolute inset-0 pointer-events-none opacity-[0.03] z-0" style={{ backgroundImage: "linear-gradient(#00E5FF 1px, transparent 1px), linear-gradient(90deg, #00E5FF 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
+          <div className="absolute inset-0 pointer-events-none opacity-[0.03] z-0" style={{ backgroundImage: "linear-gradient(#b91c1c 1px, transparent 1px), linear-gradient(90deg, #b91c1c 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
 
           {/* Top bar */}
-          <header id="app-topbar" className="h-14 bg-[#0B1018]/85 backdrop-blur-md border-b border-[#183040] flex items-center justify-between px-6 shrink-0 z-10 relative">
+          <header id="app-topbar" className="h-14 bg-[var(--masterd-surface)]/85 backdrop-blur-md border-b border-[var(--masterd-border)] flex items-center justify-between px-6 shrink-0 z-10 relative">
             <div className="flex items-center gap-4">
               <span className="font-bold tracking-wider text-xs text-[#E6F7FF] uppercase">System Dashboard</span>
               <div className="h-4 w-[1px] bg-[#183040]"></div>
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-[#00E5FF] animate-pulse shadow-[0_0_8px_#00E5FF]"></div>
-                <span className="text-[10px] font-mono text-[#00E5FF] tracking-wide">LOCAL ENGINE: ONLINE</span>
+                <div className="w-2 h-2 rounded-full bg-[#b91c1c] animate-pulse shadow-[0_0_8px_#b91c1c]"></div>
+                <span className="text-[10px] font-mono text-[#fca5a5] tracking-wide">LOCAL ENGINE: ONLINE</span>
               </div>
             </div>
 
             <div className="flex items-center gap-4 text-xs font-mono">
-              <div className="hidden sm:flex items-center gap-1.5 text-[#A7C7D9]">
-                <span className="text-[#6C8798]">Active Core:</span>
+              <div className="hidden sm:flex items-center gap-1.5 text-[#a1a1aa]">
+                <span className="text-[var(--masterd-smoke)]">Active Core:</span>
                 <span className="text-green-400 font-bold bg-green-500/10 px-1.5 py-0.2 border border-green-500/15 rounded-[2px] uppercase text-[9px]">
                   {status?.engine || "Starting..."}
                 </span>
               </div>
 
-              <div className="hidden md:flex items-center gap-1.5 text-[#A7C7D9]">
-                <span className="text-[#6C8798]">Active Models:</span>
-                <span className="text-[#00E5FF] font-bold bg-[#00E5FF]/10 px-1.5 py-0.2 border border-[#00E5FF]/15 rounded-[2px] uppercase text-[9px]">
+              <div className="hidden md:flex items-center gap-1.5 text-[#a1a1aa]">
+                <span className="text-[var(--masterd-smoke)]">Active Models:</span>
+                <span className="text-[#fca5a5] font-bold bg-[#7f1d1d]/10 px-1.5 py-0.2 border border-[#7f1d1d]/15 rounded-[2px] uppercase text-[9px]">
                   {status?.models.filter(m => m.status === "online").length || 4} On-Duty
                 </span>
               </div>
 
-              <div className="text-[10px] font-mono text-[#6C8798] hidden lg:block">v1.4.2-stable</div>
+              <div className="text-[10px] font-mono text-[var(--masterd-smoke)] hidden lg:block">v1.4.2-stable</div>
 
               {errorCount > 0 && (
                 <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] uppercase font-bold px-2 py-0.2 rounded-[2px] animate-pulse flex items-center gap-1 shadow-[0_0_8px_rgba(239,68,68,0.2)]">
@@ -302,12 +324,21 @@ export default function Home() {
                 title="Toggle MASTERd Intelligence chat"
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-[4px] border text-[9px] font-mono uppercase transition-all ${
                   chatOpen
-                    ? "border-[#00E5FF]/50 text-[#00E5FF] bg-[#00E5FF]/10 shadow-[0_0_8px_rgba(0,229,255,0.15)]"
-                    : "border-[#183040] text-[#6C8798] hover:text-[#00E5FF] hover:border-[#00E5FF]/30"
+                    ? "border-[#b91c1c]/50 text-[#fca5a5] bg-[#7f1d1d]/10 shadow-[0_0_8px_rgba(127,29,29,0.15)]"
+                    : "border-[var(--masterd-border)] text-[var(--masterd-smoke)] hover:text-[#fca5a5] hover:border-[#b91c1c]/30"
                 }`}
               >
                 <MessageSquare className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Intelligence</span>
+              </button>
+
+              <button
+                onClick={replayTutorial}
+                title="Replay welcome tour"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-[4px] border border-[var(--masterd-border)] text-[9px] font-mono uppercase text-[var(--masterd-smoke)] hover:text-[#fca5a5] hover:border-[#b91c1c]/30 transition-all"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Guide</span>
               </button>
             </div>
           </header>
@@ -315,15 +346,15 @@ export default function Home() {
           {/* View workspace */}
           <div id="app-workspace" className="flex-1 bg-transparent flex flex-col overflow-y-auto p-6 min-w-0 relative z-10">
             
-            <div className="flex items-center gap-2.5 text-[10px] text-[#6C8798] font-mono uppercase tracking-widest mb-4 border-b border-[#183040]/30 pb-2">
+            <div className="flex items-center gap-2.5 text-[10px] text-[var(--masterd-smoke)] font-mono uppercase tracking-widest mb-4 border-b border-[var(--masterd-border)]/30 pb-2">
               <span>MASTERD</span>
               <ChevronRight className="w-3.5 h-3.5 opacity-50" />
-              <span className="text-[#00E5FF] font-medium">{activeTab.replace(/_/g, " ")} workspace</span>
+              <span className="text-[#fca5a5] font-medium">{activeTab.replace(/_/g, " ")} workspace</span>
             </div>
 
             {!initLoaded ? (
               <div className="flex-grow flex flex-col justify-center items-center text-center">
-                <Activity className="w-10 h-10 text-[#00E5FF] animate-spin mb-3" />
+                <Activity className="w-10 h-10 text-[#fca5a5] animate-spin mb-3" />
                 <p className="font-mono text-xs">Initializing MASTERd engine...</p>
               </div>
             ) : (
@@ -357,24 +388,24 @@ export default function Home() {
           </div>
 
           {/* Status bar */}
-          <footer id="app-statusbar" className="h-8 bg-[#060A10] border-t border-[#183040] px-6 flex items-center justify-between text-[10px] font-mono tracking-wide text-[#6C8798] shrink-0 z-10">
+          <footer id="app-statusbar" className="h-8 bg-[#09090b] border-t border-[var(--masterd-border)] px-6 flex items-center justify-between text-[10px] font-mono tracking-wide text-[var(--masterd-smoke)] shrink-0 z-10">
             <div className="flex items-center gap-4">
               <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#00E5FF] animate-pulse inline-block" />
-                PENDING: <span className="text-[#00E5FF] font-bold">{(status?.queues.pending ?? 0) + (status?.queues.processing ?? 0)}</span>
+                <span className="w-2 h-2 rounded-full bg-[#b91c1c] animate-pulse inline-block" />
+                PENDING: <span className="text-[#fca5a5] font-bold">{(status?.queues.pending ?? 0) + (status?.queues.processing ?? 0)}</span>
               </span>
               <span>|</span>
-              <span className="hover:text-[#E6F7FF] cursor-pointer" onClick={() => setActiveTab("review")}>
+              <span className="hover:text-[#f4f4f5] cursor-pointer" onClick={() => setActiveTab("review")}>
                 REVIEW: <span className={`${pendingReviewCount > 0 ? "text-amber-400 font-bold" : "text-[#6C8798]"}`}>{pendingReviewCount}</span>
               </span>
               <span>|</span>
               <span className="hidden sm:inline-block">
-                WATCHERS: <span className="text-[#00E5FF]">{activeWatchFolders.filter((w: WatchFolder) => w.enabled).length} ACTIVE</span>
+                WATCHERS: <span className="text-[#fca5a5]">{activeWatchFolders.filter((w: WatchFolder) => w.enabled).length} ACTIVE</span>
               </span>
             </div>
 
             <div className="flex items-center gap-4">
-              <span className="hidden md:inline-block">LAST OP: <span className="text-[#A7C7D9]">RENAME_APPROVE_TAX_2023</span></span>
+              <span className="hidden md:inline-block">LAST OP: <span className="text-[#a1a1aa]">RENAME_APPROVE_TAX_2023</span></span>
               <span>|</span>
               <span>DATABASE: <span className="text-green-400 font-medium">CONNECTED</span></span>
             </div>
@@ -389,6 +420,14 @@ export default function Home() {
         )}
 
       </div>
+      <WelcomeTour
+        open={tutorialOpen}
+        step={tutorialStep}
+        totalSteps={4}
+        onClose={closeTutorial}
+        onNext={() => setTutorialStep((s) => Math.min(s + 1, 3))}
+        onBack={() => setTutorialStep((s) => Math.max(s - 1, 0))}
+      />
     </main>
   );
 }
