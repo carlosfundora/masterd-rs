@@ -12,7 +12,8 @@ MASTERd is a fully Rust-first document intelligence platform with a Tauri deskto
 - **Multi-stage ingestion pipeline** — hash → hot-cache → dedup → canonical SQLite write → LanceDB vector snapshot → Meilisearch lexical index → ColBERT rerank queue → Falkor graph mirror
 - **Embedded GGUF inference** — LFM2.5-1.2B-Thinking and LFM2.5-350M-Instruct bundled as `include_bytes!` assets, loaded via llama.cpp; Ollama fallback when models are unavailable
 - **ColBERT MaxSim reranker** — L2-normalized token-matrix reranking (correct cosine similarity, not raw dot product)
-- **Python embedding services** — FastAPI servers for ColBERT, Jina v3, and Qwen3-Embedding; setup script enforces AMD ROCm PyTorch index
+- **Python embedding services** — FastAPI servers for ColBERT and Jina v3; setup script enforces AMD ROCm PyTorch index
+- **Rust static embeddings** — vendored `model2vec-rs` provides a fast local embedding path and structural fallback
 - **Supervised sidecar processes** — Meilisearch and Valkey managed by `SidecarSupervisor`, with optional FalkorDB graph module
 - **AMD ROCm–first** — all Python installs routed through ROCm PyTorch index; CUDA wheels blocked by `config/rocm-constraints.txt`
 - **Boot MIDI player** — ambient music on app launch, pure Rust
@@ -31,7 +32,7 @@ apps/
 
 crates/
   masterd-chat-engine/     ← Embedded GGUF chat + Ollama fallback
-  masterd-embed-engine/    ← Local embedding stack (ColBERT / Jina / Qwen3)
+  masterd-embed-engine/    ← Local embedding stack (ColBERT / Jina / model2vec-rs)
   masterd-index/           ← ColBERT reranker, atomic hash-index dedup
   masterd-pipeline/        ← Typed stage-graph, retrieval pipeline, naming rules
   masterd-core/            ← Shared types, cancellation contract
@@ -49,7 +50,7 @@ models/
 services/
   colbert-service/         ← FastAPI ColBERT HTTP server (port 11450)
   jina-service/            ← FastAPI Jina v3 HTTP server (port 11447)
-  qwen3-service/           ← FastAPI Qwen3-Embedding HTTP server (port 11502)
+  model2vec-rs/            ← Vendored Rust static-embedding crate (local fallback)
 
 vendor/
   candle/                  ← Hugging Face Candle ML framework (vendored)
@@ -101,7 +102,7 @@ cargo run -p masterd-bootstrap
 
 # 4. Run the desktop app
 #    This starts the Tauri app, launches Meilisearch/Valkey/FalkorDB + the
-#    ColBERT/Jina/Qwen3 embedding services, and preloads both LFM2.5 models.
+#    ColBERT/Jina embedding services, the model2vec-rs local fallback, and preloads both LFM2.5 models.
 pnpm dev
 
 # — OR — run the desktop app directly from the Tauri crate:
@@ -126,17 +127,17 @@ Pipeline stages (configurable in `config/pipeline.toml`):
 8. Jina omni multimodal queue (optional)
 9. Falkor graph mirror queue
 
-## Python embedding services (AMD ROCm)
+## Embedding stack
 
-The embedding services run as separate HTTP processes. The main installer sets them up by default, including Jina model prefetch. All installs are routed through the AMD ROCm PyTorch index — no CUDA wheels are permitted.
+The live embedding stack uses Jina as the primary service path and vendored `model2vec-rs` as a fast local parallel source. The main installer sets up the Jina service by default, and all Python installs are routed through the AMD ROCm PyTorch index — no CUDA wheels are permitted.
 
 > [!NOTE]
-> Whenever the desktop app is launched, it automatically starts the embedding services (ColBERT, Jina, Qwen3) as supervised processes and preloads the embedded LFM2.5 thinking and instruct models. This happens from both `pnpm dev` at the repo root and `cargo tauri dev` inside `apps/masterd-desktop-tauri`.
+> Whenever the desktop app is launched, it automatically starts the embedding services (ColBERT, Jina) as supervised processes, keeps the local `model2vec-rs` path available, and preloads the embedded LFM2.5 thinking and instruct models. This happens from both `pnpm dev` at the repo root and `cargo tauri dev` inside `apps/masterd-desktop-tauri`.
 > 
 > You can also start the services manually for CLI tools or development:
 
 ```bash
-# Set up all three service venvs (Python 3.12 + ROCm torch)
+# Set up the embedding service venvs (Python 3.12 + ROCm torch)
 ./scripts/setup-embedding-services.sh all
 
 # Skip embedding-service setup during installer builds only when needed:
@@ -145,7 +146,6 @@ MASTERD_SKIP_EMBEDDING_SERVICES=1 ./scripts/build-installer-bundles.sh
 # Start a service manually
 services/colbert-service/.venv/bin/python services/colbert-service/server.py
 services/jina-service/.venv/bin/python    services/jina-service/server.py
-services/qwen3-service/.venv/bin/python   services/qwen3-service/server.py
 ```
 
 Service endpoints (when running):
@@ -153,7 +153,7 @@ Service endpoints (when running):
 |---------|------|------|
 | ColBERT | 11450 | Token-matrix reranking |
 | Jina v3 | 11447 | Dense code/text embeddings |
-| Qwen3-Embedding | 11502 | Dense semantic embeddings |
+| model2vec-rs | local | Fast static embeddings / structural fallback |
 
 Switch backend in `config/embedding_engine.toml` or env vars:
 ```bash
@@ -246,6 +246,7 @@ You can ship a **single installer** that includes everything, but not all of the
 - **Valkey**: run as supervised sidecar process
 - **Falkor module**: load into Valkey/Redis sidecar (`--loadmodule`)
 - **LanceDB**: in-process Rust crate integration (not a daemon)
+- **model2vec-rs**: vendored Rust crate for local static embeddings and structural fallback
 
 This repo enforces that model via `masterd-sidecars::validate_foundation()`.
 
@@ -268,20 +269,20 @@ cd /home/local/ai/projects/MASTERd
 cargo run -p masterd-ingest -- --root /path/to/files
 ```
 
-## Embedded 3-model local inference setup (ported)
+## Embedded local inference setup (ported)
 
 Copied from your atom-rs/gfxatom runtime pattern:
 
 - ColBERT wrapper: `http://127.0.0.1:11450` (`colbert-lfm2-305m`)
-- Qwen3 embeddings: `http://127.0.0.1:11502` (`qwen3-embedding`)
 - Jina embeddings: `http://127.0.0.1:11447` (`jina-code-embed`)
+- model2vec-rs fallback: vendored local crate in `crates/model2vec-rs`
 
 Config file: `config/embedding_engine.toml`  
-Env overrides supported: `MEMORYBANK_COLBERT_WRAPPER_URL`, `MEMORYBANK_QWEN3_URL`, `MEMORYBANK_JINA_URL`, `MEMORYBANK_EMBED_CONCURRENCY`.
+Env overrides supported: `MEMORYBANK_COLBERT_WRAPPER_URL`, `MEMORYBANK_JINA_URL`, `MEMORYBANK_EMBED_CONCURRENCY`.
 
 Backend mode:
 - `MASTERD_INFERENCE_BACKEND=direct` (default): self-contained Rust direct calls (no local model HTTP servers required)
-- `MASTERD_INFERENCE_BACKEND=http`: use the 3 local endpoint wrappers above
+- `MASTERD_INFERENCE_BACKEND=http`: use the local endpoint wrappers above
 
 To run ingest + engine verification/benchmark:
 
