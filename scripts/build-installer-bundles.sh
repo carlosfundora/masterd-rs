@@ -123,7 +123,6 @@ cleanup_midi() {
 }
 
 trap cleanup_midi EXIT
-play_boot_midi
 
 pad_line() {
   printf "%-${INNER_WIDTH}s" "$1"
@@ -161,6 +160,7 @@ logo_line "${WHITE}" "  ORGANIZE OR BE ORGANIZED."
 printf "%b╚%s╝%b\n" "${RED}" "${HBAR}" "${RESET}"
 
 ensure_source_build_tools
+play_boot_midi
 
 # ── Model asset install ───────────────────────────────────────────────────
 if [[ "${MASTERD_SKIP_MODEL_DOWNLOAD:-0}" == "1" ]]; then
