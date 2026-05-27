@@ -1,7 +1,5 @@
 # Mark binary files so git doesn't try to diff them as text.
-# GGUF model weights are excluded via .gitignore — use scripts/download-models.sh
-
-*.gguf  -diff -merge -text
+# GGUF model weights are excluded via .gitignore.
 *.sf2   -diff -text
 *.pdf   -diff -text
 *.png   -diff -text

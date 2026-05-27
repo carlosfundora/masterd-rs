@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../masterd-shell/out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "cd ../masterd-shell && npm run dev",
-    "beforeBuildCommand": "cd ../masterd-shell && npm run build"
+    "beforeDevCommand": "bash -lc 'for d in apps/masterd-shell masterd-shell ../masterd-shell; do if [ -f \"$d/package.json\" ]; then exec npm --prefix \"$d\" run dev; fi; done; echo \"masterd-shell package.json not found\" >&2; exit 1'",
+    "beforeBuildCommand": "bash -lc 'for d in apps/masterd-shell masterd-shell ../masterd-shell; do if [ -f \"$d/package.json\" ]; then exec npm --prefix \"$d\" run build; fi; done; echo \"masterd-shell package.json not found\" >&2; exit 1'"
   },
   "app": {
     "windows": [

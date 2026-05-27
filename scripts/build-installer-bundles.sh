@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${ROOT_DIR}/dist/installer-bundles"
 mkdir -p "${OUT_DIR}"
 
+MASTERD_BUILD_JOBS="${MASTERD_BUILD_JOBS:-8}"
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-${MASTERD_BUILD_JOBS}}"
+
 # ── AMD ROCm enforcement ───────────────────────────────────────────────────
 # All Python package resolution in this build must use the AMD ROCm PyTorch
 # index. These env vars are inherited by every subprocess (uv, pip, cargo
@@ -57,16 +60,27 @@ play_boot_midi() {
     return 0
   fi
 
-  local player="${ROOT_DIR}/target/debug/masterd-midi-player"
-  if [[ ! -x "${player}" ]]; then
-    cargo build -q -p masterd-midi-player >/dev/null 2>&1 || return 0
+  local midi_file="${ROOT_DIR}/apps/masterd-midi-player/assets/sample.mid"
+  if [[ ! -f "${midi_file}" ]]; then
+    return 0
   fi
+
+  local player="${ROOT_DIR}/target/debug/masterd-midi-player"
   if [[ -x "${player}" ]]; then
     "${player}" \
       --seconds "${MASTERD_BOOT_MUSIC_SECONDS:-24}" \
-      --midi-file "${ROOT_DIR}/apps/masterd-midi-player/assets/sample.mid" >/dev/null 2>&1 &
+      --midi-file "${midi_file}" >/dev/null 2>&1 &
     MIDI_PID="$!"
+    return 0
   fi
+
+  (
+    cd "${ROOT_DIR}"
+    cargo run -q -p masterd-midi-player -- \
+      --seconds "${MASTERD_BOOT_MUSIC_SECONDS:-24}" \
+      --midi-file "${midi_file}"
+  ) >/dev/null 2>&1 &
+    MIDI_PID="$!"
 }
 
 cleanup_midi() {
@@ -115,7 +129,20 @@ printf "%b╚%s╝%b\n" "${RED}" "${HBAR}" "${RESET}"
 
 # ── Sidecar binary download ────────────────────────────────────────────────
 ARCH="$(uname -m)"
-PLATFORM="linux-${ARCH}"
+case "${ARCH}" in
+  x86_64|amd64)
+    MEILI_PLATFORM="linux-amd64"
+    FALKOR_PLATFORM="linux-amd64"
+    ;;
+  aarch64|arm64)
+    MEILI_PLATFORM="linux-aarch64"
+    FALKOR_PLATFORM="linux-aarch64"
+    ;;
+  *)
+    printf "ERROR: unsupported installer architecture: %s\n" "${ARCH}" >&2
+    exit 1
+    ;;
+esac
 BIN_DIR="${ROOT_DIR}/apps/masterd-desktop-tauri/binaries"
 MOD_DIR="${ROOT_DIR}/apps/masterd-desktop-tauri/modules"
 mkdir -p "${BIN_DIR}" "${MOD_DIR}"
@@ -124,8 +151,8 @@ mkdir -p "${BIN_DIR}" "${MOD_DIR}"
 MEILI_VERSION="v1.8.3"
 MEILI_BIN="${BIN_DIR}/meilisearch"
 if [[ ! -f "${MEILI_BIN}" ]]; then
-  printf "%b║%b  Downloading meilisearch %s for %s...%b\n" "${RED}" "${CYAN}" "${MEILI_VERSION}" "${PLATFORM}" "${RESET}"
-  MEILI_URL="https://github.com/meilisearch/meilisearch/releases/download/${MEILI_VERSION}/meilisearch-${PLATFORM}"
+  printf "%b║%b  Downloading meilisearch %s for %s...%b\n" "${RED}" "${CYAN}" "${MEILI_VERSION}" "${MEILI_PLATFORM}" "${RESET}"
+  MEILI_URL="https://github.com/meilisearch/meilisearch/releases/download/${MEILI_VERSION}/meilisearch-${MEILI_PLATFORM}"
   curl -fsSL "${MEILI_URL}" -o "${MEILI_BIN}"
   chmod +x "${MEILI_BIN}"
   printf "%b║%b  meilisearch downloaded.%b\n" "${RED}" "${GREEN}" "${RESET}"
@@ -145,7 +172,7 @@ if [[ ! -f "${VALKEY_BIN}" ]]; then
     curl -fsSL "https://github.com/valkey-io/valkey/archive/refs/tags/${VALKEY_VERSION}.tar.gz" -o "${VALKEY_TAR}"
   fi
   tar -xzf "${VALKEY_TAR}" -C "${VALKEY_TMP}" --strip-components=1
-  (cd "${VALKEY_TMP}" && make -j"$(nproc)" 2>&1 | tail -5)
+  (cd "${VALKEY_TMP}" && PATH="/usr/bin:/bin:${PATH}" make RM=/usr/bin/rm -j"${MASTERD_BUILD_JOBS}" 2>&1 | tail -5)
   cp "${VALKEY_TMP}/src/valkey-server" "${VALKEY_BIN}"
   chmod +x "${VALKEY_BIN}"
   printf "%b║%b  valkey-server built and installed.%b\n" "${RED}" "${GREEN}" "${RESET}"
@@ -157,13 +184,13 @@ fi
 FALKOR_VERSION="v4.3.1"
 FALKOR_SO="${MOD_DIR}/falkordb.so"
 if [[ ! -f "${FALKOR_SO}" ]]; then
-  FALKOR_URL="https://github.com/FalkorDB/FalkorDB/releases/download/${FALKOR_VERSION}/falkordb-${PLATFORM}.so"
+  FALKOR_URL="https://github.com/FalkorDB/FalkorDB/releases/download/${FALKOR_VERSION}/falkordb-${FALKOR_PLATFORM}.so"
   printf "%b║%b  Attempting FalkorDB module download...%b\n" "${RED}" "${CYAN}" "${RESET}"
   if curl -fsSL "${FALKOR_URL}" -o "${FALKOR_SO}" 2>/dev/null; then
     printf "%b║%b  FalkorDB module installed.%b\n" "${RED}" "${GREEN}" "${RESET}"
   else
     printf "%b║%b  FalkorDB not available for this platform — graph queries will be disabled.%b\n" "${RED}" "${YELLOW}" "${RESET}"
-    rm -f "${FALKOR_SO}"
+    /usr/bin/rm -f "${FALKOR_SO}"
   fi
 fi
 
@@ -174,7 +201,7 @@ printf "%b║%b  Frontend built.%b\n" "${RED}" "${GREEN}" "${RESET}"
 
 # ── Tauri app + installer bundle ──────────────────────────────────────────
 printf "%b║%b  Compiling Tauri desktop app and producing installer...%b\n" "${RED}" "${CYAN}" "${RESET}"
-(cd "${ROOT_DIR}/apps/masterd-desktop-tauri" && cargo tauri build 2>&1 | tail -15)
+(cd "${ROOT_DIR}/apps/masterd-desktop-tauri" && cargo tauri build)
 printf "%b║%b  Installer bundles written to:%b\n" "${RED}" "${GREEN}" "${RESET}"
 find "${ROOT_DIR}/apps/masterd-desktop-tauri/target/release/bundle" \
   -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" 2>/dev/null | while read -r f; do

@@ -9,10 +9,6 @@
 #   `--index pytorch-rocm-nightly` to force the ROCm wheel.
 # - Never install from PyPI directly for GPU packages.
 
-[pip]
-# Apply ROCm constraints globally in this project.
-constraint-dependencies = ["config/rocm-constraints.txt"]
-
 [[index]]
 name = "pytorch-rocm-nightly"
 url = "https://download.pytorch.org/whl/nightly/rocm6.3"

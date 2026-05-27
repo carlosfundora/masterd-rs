@@ -1,6 +1,9 @@
 # ── Documentation / research (tracked separately, not in git) ────────────
 *.pdf
 
+# ── Local model weights ──────────────────────────────────────────────────
+*.gguf
+
 /target/
 apps/masterd-desktop-tauri/target/
 apps/masterd-ingest/target/
