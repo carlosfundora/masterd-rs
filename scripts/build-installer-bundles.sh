@@ -330,11 +330,6 @@ else
   printf "%b║%b  FalkorDB graph DB already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
 fi
 
-# ── Frontend build ─────────────────────────────────────────────────────────
-printf "%b║%b  Building Next.js frontend...%b\n" "${RED}" "${CYAN}" "${RESET}"
-"${ROOT_DIR}/apps/masterd-desktop-tauri/build-shell.sh"
-printf "%b║%b  Frontend built.%b\n" "${RED}" "${GREEN}" "${RESET}"
-
 # ── Tauri app + installer bundle ──────────────────────────────────────────
 printf "%b║%b  Compiling Tauri desktop app and producing installer...%b\n" "${RED}" "${CYAN}" "${RESET}"
 (cd "${ROOT_DIR}/apps/masterd-desktop-tauri" && cargo tauri build)
