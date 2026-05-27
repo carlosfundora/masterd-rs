@@ -70,7 +70,7 @@ vendor/
 - **Valkey** v7.2.5 — hot-cache and dedup store
 - **FalkorDB** (optional) — graph relationship queries
 
-### Python embedding services (optional, AMD ROCm)
+### Python embedding services (AMD ROCm)
 - **Python 3.12**
 - **uv** — `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - **AMD ROCm 6.x or 7.x** runtime
@@ -123,14 +123,14 @@ Pipeline stages (configurable in `config/pipeline.toml`):
 
 ## Python embedding services (AMD ROCm)
 
-The embedding services run as separate HTTP processes. All installs are routed through the AMD ROCm PyTorch index — no CUDA wheels are permitted.
+The embedding services run as separate HTTP processes. The main installer sets them up by default, including Jina model prefetch. All installs are routed through the AMD ROCm PyTorch index — no CUDA wheels are permitted.
 
 ```bash
 # Set up all three service venvs (Python 3.12 + ROCm torch)
 ./scripts/setup-embedding-services.sh all
 
-# Or include this optional setup in the main installer sequence:
-MASTERD_SETUP_EMBEDDING_SERVICES=1 ./scripts/build-installer-bundles.sh
+# Skip embedding-service setup during installer builds only when needed:
+MASTERD_SKIP_EMBEDDING_SERVICES=1 ./scripts/build-installer-bundles.sh
 
 # Start a service
 services/colbert-service/.venv/bin/python services/colbert-service/server.py
@@ -332,7 +332,7 @@ cd /home/local/ai/projects/MASTERd
 Installer sequence:
 1. Launch boot MIDI unless `MASTERD_NO_MUSIC=1`.
 2. Run `scripts/download-models.sh` unless `MASTERD_SKIP_MODEL_DOWNLOAD=1`.
-3. Optionally run `scripts/setup-embedding-services.sh all` when `MASTERD_SETUP_EMBEDDING_SERVICES=1`.
+3. Run `scripts/setup-embedding-services.sh all` unless `MASTERD_SKIP_EMBEDDING_SERVICES=1`.
 4. Download/build sidecars, build the Next shell, and package Tauri.
 
 ## Boot screen + Rust music

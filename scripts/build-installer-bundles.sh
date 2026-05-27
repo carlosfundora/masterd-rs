@@ -136,10 +136,12 @@ else
   printf "%b║%b  Model assets ready.%b\n" "${RED}" "${GREEN}" "${RESET}"
 fi
 
-if [[ "${MASTERD_SETUP_EMBEDDING_SERVICES:-0}" == "1" ]]; then
-  printf "%b║%b  Setting up optional embedding service environments...%b\n" "${RED}" "${CYAN}" "${RESET}"
+if [[ "${MASTERD_SKIP_EMBEDDING_SERVICES:-0}" == "1" ]]; then
+  printf "%b║%b  Skipping embedding service setup (MASTERD_SKIP_EMBEDDING_SERVICES=1).%b\n" "${RED}" "${YELLOW}" "${RESET}"
+else
+  printf "%b║%b  Setting up embedding service environments...%b\n" "${RED}" "${CYAN}" "${RESET}"
   "${ROOT_DIR}/scripts/setup-embedding-services.sh" all
-  printf "%b║%b  Optional embedding service environments ready.%b\n" "${RED}" "${GREEN}" "${RESET}"
+  printf "%b║%b  Embedding service environments ready.%b\n" "${RED}" "${GREEN}" "${RESET}"
 fi
 
 # ── Sidecar binary download ────────────────────────────────────────────────
