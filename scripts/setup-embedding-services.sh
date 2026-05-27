@@ -36,6 +36,8 @@ source "${ROOT_DIR}/scripts/lib/install-bootstrap.sh"
 ROCM_TORCH_INDEX="${ROCM_TORCH_INDEX:-https://download.pytorch.org/whl/nightly/rocm6.3}"
 ROCM_STABLE_INDEX="${ROCM_STABLE_INDEX:-https://download.pytorch.org/whl/rocm6.2.4}"
 ROCM_CONSTRAINTS="${ROOT_DIR}/config/rocm-constraints.txt"
+unset UV_EXTRA_INDEX_URL UV_INDEX_URL UV_CONSTRAINT
+unset PIP_EXTRA_INDEX_URL PIP_INDEX_URL PIP_CONSTRAINT
 
 # Block CUDA; ROCm only.
 export CUDA_VISIBLE_DEVICES=""
@@ -75,7 +77,7 @@ install_requirements() {
   local reqs_file="$2"
 
   if [[ -n "${UV_BIN}" ]]; then
-    "${UV_BIN}" pip install \
+    masterd_without_python_index_env "${UV_BIN}" pip install \
       --python "${venv_python}" \
       --constraint "${ROCM_CONSTRAINTS}" \
       --extra-index-url "${ROCM_TORCH_INDEX}" \
@@ -83,8 +85,8 @@ install_requirements() {
       -r "${reqs_file}"
   else
     "${venv_python}" -m ensurepip --upgrade >/dev/null 2>&1 || true
-    "${venv_python}" -m pip install --upgrade pip setuptools wheel
-    "${venv_python}" -m pip install \
+    masterd_without_python_index_env "${venv_python}" -m pip install --upgrade pip setuptools wheel
+    masterd_without_python_index_env "${venv_python}" -m pip install \
       --constraint "${ROCM_CONSTRAINTS}" \
       --extra-index-url "${ROCM_TORCH_INDEX}" \
       --extra-index-url "${ROCM_STABLE_INDEX}" \
