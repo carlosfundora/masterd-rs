@@ -126,6 +126,13 @@ masterd_ensure_installer_venv() {
     MASTERD_UV_BIN="${HOME}/.local/bin/uv"
   fi
 
+  if [[ -d "${venv_dir}" ]]; then
+    if [[ ! -x "${venv_dir}/bin/python" ]]; then
+      masterd_log "Installer venv at ${venv_dir} is corrupted (missing python executable). Re-creating..."
+      /usr/bin/rm -rf "${venv_dir}"
+    fi
+  fi
+
   if [[ ! -d "${venv_dir}" ]]; then
     masterd_log "Creating installer venv at ${venv_dir}..."
     if [[ -n "${MASTERD_UV_BIN}" ]]; then

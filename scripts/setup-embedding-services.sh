@@ -276,11 +276,14 @@ except Exception as e:
     if "ColBERT" in model_name:
         fallback = "colbert-ir/colbertv2.0"
         print(f"Retrying prefetch with fallback: {fallback}")
-        tokenizer = AutoTokenizer.from_pretrained(fallback)
-        model = AutoModel.from_pretrained(fallback)
-        print(f"prefetched fallback {fallback}")
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(fallback)
+            model = AutoModel.from_pretrained(fallback)
+            print(f"prefetched fallback {fallback}")
+        except Exception as fallback_err:
+            print(f"WARNING: Fallback prefetch failed for {fallback}: {fallback_err}")
     else:
-        raise e
+        print(f"WARNING: Prefetch failed for {model_name}, but proceeding anyway: {e}")
 PY
   success "  ${service_name} model cache ready."
 }

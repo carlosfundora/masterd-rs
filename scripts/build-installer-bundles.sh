@@ -133,6 +133,11 @@ printf "%b╚%s╝%b\n" "${RED}" "${HBAR}" "${RESET}"
 
 ensure_source_build_tools
 masterd_resolve_python "${ROOT_DIR}"
+
+printf "%b║%b  Ensuring vendored package dependencies are cloned...%b\n" "${RED}" "${CYAN}" "${RESET}"
+"${ROOT_DIR}/scripts/clone-vendors.sh"
+printf "%b║%b  Vendored packages ready.%b\n" "${RED}" "${GREEN}" "${RESET}"
+
 play_boot_midi
 
 # ── Model asset install ───────────────────────────────────────────────────
@@ -229,6 +234,7 @@ VALKEY_BIN="${BIN_DIR}/valkey-server"
 if [[ ! -f "${VALKEY_BIN}" ]] || ! native_binary_matches_arch "${VALKEY_BIN}"; then
   printf "%b║%b  Building valkey %s from source (no prebuilt binary available)...%b\n" "${RED}" "${CYAN}" "${VALKEY_VERSION}" "${RESET}"
   VALKEY_TMP="${ROOT_DIR}/target/valkey-src"
+  /usr/bin/rm -rf "${VALKEY_TMP}"
   mkdir -p "${VALKEY_TMP}"
   VALKEY_TAR="${VALKEY_TMP}/valkey-${VALKEY_VERSION}.tar.gz"
   if [[ ! -f "${VALKEY_TAR}" ]] || ! validate_valkey_tarball "${VALKEY_TAR}"; then
