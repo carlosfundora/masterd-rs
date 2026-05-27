@@ -220,6 +220,16 @@ if [[ "${SKIP_COLBERT}" == "0" ]]; then
     "${ROOT_DIR}/models/lfm2-colbert-350m/LFM2-ColBERT-350M-Q8_0.gguf" \
     300000000 \
     "LFM2-ColBERT-350M GGUF"
+
+  # Tokenizer lives in the base (non-GGUF) repo which is NOT gated.
+  # A copy is also committed to models/lfm2-colbert-350m/tokenizer.json
+  # as a fallback so fresh clones don't fail before first download.
+  hf_download \
+    "LiquidAI/LFM2-ColBERT-350M" \
+    "tokenizer.json" \
+    "${ROOT_DIR}/models/lfm2-colbert-350m/tokenizer.json" \
+    1000000 \
+    "LFM2-ColBERT-350M tokenizer"
 fi
 
 # ── Copy models to embedded assets location ───────────────────────────────
@@ -268,6 +278,10 @@ if [[ "${SKIP_COLBERT}" == "0" ]]; then
     "${ROOT_DIR}/models/lfm2-colbert-350m/LFM2-ColBERT-350M-Q8_0.gguf" \
     300000000 \
     "LFM2-ColBERT-350M GGUF"
+  verify_file \
+    "${ROOT_DIR}/models/lfm2-colbert-350m/tokenizer.json" \
+    1000000 \
+    "LFM2-ColBERT-350M tokenizer"
 fi
 
 success ""
