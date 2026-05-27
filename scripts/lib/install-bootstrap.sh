@@ -145,16 +145,16 @@ masterd_ensure_installer_venv() {
   local venv_python="${venv_dir}/bin/python"
 
   # Ensure huggingface-hub is installed in the installer venv
-  if ! "${venv_python}" -c "import huggingface_hub" >/dev/null 2>&1; then
+  if ! "${venv_python}" -c "import huggingface_hub, httpx, requests" >/dev/null 2>&1; then
     masterd_log "Installing huggingface-hub into installer venv..."
     if [[ -n "${MASTERD_UV_BIN}" ]]; then
-      masterd_without_python_index_env "${MASTERD_UV_BIN}" pip install \
+      UV_NO_CONFIG=1 masterd_without_python_index_env "${MASTERD_UV_BIN}" pip install \
         --python "${venv_python}" \
-        huggingface-hub
+        huggingface-hub httpx requests
     else
       "${venv_python}" -m ensurepip --upgrade >/dev/null 2>&1 || true
       masterd_without_python_index_env "${venv_python}" -m pip install --upgrade pip setuptools wheel
-      masterd_without_python_index_env "${venv_python}" -m pip install huggingface-hub
+      masterd_without_python_index_env "${venv_python}" -m pip install huggingface-hub httpx requests
     fi
   fi
 

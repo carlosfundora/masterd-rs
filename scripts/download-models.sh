@@ -38,6 +38,7 @@ die()     { printf "%b[download-models] ERROR:%b %s\n" "${RED}" "${RESET}" "$*" 
 
 SKIP_CHAT="${SKIP_CHAT:-0}"
 SKIP_COLBERT="${SKIP_COLBERT:-0}"
+JINA_V5_SIZE="${JINA_V5_SIZE:-both}"
 HF_TOKEN="${HF_TOKEN:-}"
 FORCE="${FORCE:-0}"
 VERIFY_ONLY="${VERIFY_ONLY:-0}"
@@ -46,12 +47,17 @@ for arg in "$@"; do
   case "${arg}" in
     --skip-chat)    SKIP_CHAT=1 ;;
     --skip-colbert) SKIP_COLBERT=1 ;;
+    --jina-v5-size)
+      JINA_V5_SIZE="$2"
+      shift 2
+      ;;
     --force)        FORCE=1 ;;
     --verify-only)  VERIFY_ONLY=1 ;;
     --help|-h)
-      echo "Usage: $0 [--skip-chat] [--skip-colbert] [--force] [--verify-only]"
+      echo "Usage: $0 [--skip-chat] [--skip-colbert] [--jina-v5-size both|nano|small] [--force] [--verify-only]"
       echo "  --skip-chat     Skip downloading chat models (thinking + instruct)"
       echo "  --skip-colbert  Skip downloading ColBERT reranker model"
+      echo "  --jina-v5-size  Specify jina-v5 size to use (default: both). Options: both, nano, small"
       echo "  --force         Re-download files even if they already exist"
       echo "  --verify-only   Only verify local model files; do not download"
       echo ""
@@ -59,7 +65,10 @@ for arg in "$@"; do
       echo "  export HF_TOKEN=hf_your_token_here"
       exit 0 ;;
     *)
-      die "unknown argument: ${arg}" ;;
+      if [[ "${arg}" != "nano" && "${arg}" != "small" && "${arg}" != "both" ]]; then
+        die "unknown argument: ${arg}"
+      fi
+      ;;
   esac
 done
 
@@ -168,6 +177,55 @@ PY
   success "  ${filename} → ${dest}"
 }
 
+# ── HuggingFace snapshot download helper ──────────────────────────────────
+hf_snapshot_download() {
+  local repo="$1"        # e.g. jinaai/jina-embeddings-v5-omni-nano
+  local dest="$2"        # destination file path
+  local label="$3"
+
+  if [[ -d "${dest}" && "${FORCE}" != "1" && -f "${dest}/config.json" ]]; then
+    warn "  Already exists and verified, skipping: ${dest}"
+    return 0
+  fi
+
+  if [[ "${VERIFY_ONLY}" == "1" ]]; then
+    if [[ ! -f "${dest}/config.json" ]]; then
+      die "missing ${label} config: ${dest}/config.json"
+    fi
+    return 0
+  fi
+
+  mkdir -p "${dest}"
+  info "  Downloading snapshot from ${repo}..."
+
+  if [[ -n "${MASTERD_INSTALLER_PYTHON:-}" ]]; then
+    HF_REPO="${repo}" HF_DEST="${dest}" HF_TOKEN="${HF_TOKEN}" "${MASTERD_INSTALLER_PYTHON}" - <<'PY'
+import os
+import shutil
+import sys
+from pathlib import Path
+from huggingface_hub import snapshot_download
+
+repo = os.environ["HF_REPO"]
+dest = Path(os.environ["HF_DEST"])
+token = os.environ.get("HF_TOKEN") or None
+
+print(f"Downloading snapshot for {repo} to {dest}...")
+snapshot_download(
+    repo_id=repo,
+    local_dir=str(dest),
+    token=token,
+    ignore_patterns=["*.msgpack", "*.h5", "*.ot", "*~", ".git*"]
+)
+print(f"Downloaded snapshot to {dest}")
+PY
+  else
+    die "Cannot download full snapshot without MASTERd_INSTALLER_PYTHON. Run from install.sh or bootstrap a venv with huggingface-hub."
+  fi
+
+  success "  ${repo} -> ${dest}"
+}
+
 info "MASTERd model downloader"
 info "Root: ${ROOT_DIR}"
 [[ -n "${HF_TOKEN}" ]] && info "HF_TOKEN: set" || warn "HF_TOKEN: not set (may fail for gated models)"
@@ -235,6 +293,16 @@ if [[ "${SKIP_COLBERT}" == "0" ]]; then
     "${ROOT_DIR}/models/lfm2-colbert-350m/tokenizer.json" \
     1000000 \
     "LFM2-ColBERT-350M tokenizer"
+fi
+
+if [[ "${JINA_V5_SIZE}" == "small" || "${JINA_V5_SIZE}" == "both" ]]; then
+  info "── Downloading Jina v5 Omni Small (dense embedding model) ─────────────────────"
+  hf_snapshot_download "jinaai/jina-embeddings-v5-omni-small" "${ROOT_DIR}/models/jina-v5-omni-small" "Jina v5 Omni Small"
+fi
+
+if [[ "${JINA_V5_SIZE}" == "nano" || "${JINA_V5_SIZE}" == "both" ]]; then
+  info "── Downloading Jina v5 Omni Nano (dense embedding model) ─────────────────────"
+  hf_snapshot_download "jinaai/jina-embeddings-v5-omni-nano" "${ROOT_DIR}/models/jina-v5-omni-nano" "Jina v5 Omni Nano"
 fi
 
 # ── Copy models to embedded assets location ───────────────────────────────

@@ -23,7 +23,7 @@ app = FastAPI(title="MASTERd Jina Embedding Service")
 _model = None
 _tokenizer = None
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cpu"
 MODEL_NAME = os.getenv("JINA_MODEL", "jinaai/jina-embeddings-v3")
 MAX_LENGTH = int(os.getenv("JINA_MAX_LENGTH", "8192"))
 

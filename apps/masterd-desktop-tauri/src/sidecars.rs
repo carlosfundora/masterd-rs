@@ -80,6 +80,19 @@ fn resource_asset(
 }
 
 fn trusted_asset(root: &Path, path: &Path, required: bool) -> Result<Option<PathBuf>> {
+    trusted_asset_inner(root, path, required, false)
+}
+
+fn trusted_dev_interpreter(root: &Path, path: &Path, required: bool) -> Result<Option<PathBuf>> {
+    trusted_asset_inner(root, path, required, cfg!(debug_assertions))
+}
+
+fn trusted_asset_inner(
+    root: &Path,
+    path: &Path,
+    required: bool,
+    allow_external_symlink_target: bool,
+) -> Result<Option<PathBuf>> {
     if !path.exists() {
         if required {
             anyhow::bail!("required sidecar asset is missing: {}", path.display());
@@ -94,7 +107,12 @@ fn trusted_asset(root: &Path, path: &Path, required: bool) -> Result<Option<Path
     let canonical_path = path
         .canonicalize()
         .with_context(|| format!("canonicalize sidecar asset {}", path.display()))?;
-    if !canonical_path.starts_with(&canonical_root) {
+    let checked_path = if allow_external_symlink_target {
+        path.to_path_buf()
+    } else {
+        canonical_path.clone()
+    };
+    if !checked_path.starts_with(&canonical_root) {
         anyhow::bail!(
             "sidecar asset {} resolves outside trusted root {}",
             canonical_path.display(),
@@ -104,7 +122,7 @@ fn trusted_asset(root: &Path, path: &Path, required: bool) -> Result<Option<Path
 
     #[cfg(unix)]
     {
-        let mut current = Some(canonical_path.as_path());
+        let mut current = Some(checked_path.as_path());
         while let Some(path) = current {
             let mode = std::fs::metadata(path)?.permissions().mode();
             if mode & 0o002 != 0 {
@@ -150,6 +168,12 @@ impl SidecarSupervisor {
             11447,
             resource_dir,
         )?;
+        self.start_python_service(
+            "jina-v5-service",
+            &services_dir.join("jina-v5-service"),
+            11502,
+            resource_dir,
+        )?;
         self.start_model2vec_service(resource_dir)?;
         Ok(())
     }
@@ -167,7 +191,7 @@ impl SidecarSupervisor {
         }
         drop(procs);
 
-        let Some(bin) = trusted_asset(
+        let Some(bin) = trusted_dev_interpreter(
             trust_root,
             &service_dir.join(".venv").join("bin").join("python"),
             RELEASE_REQUIRES_ASSETS,
@@ -225,21 +249,18 @@ impl SidecarSupervisor {
         }
         drop(procs);
 
-        let service_dir = resource_dir.join("services").join("model2vec-service");
-        let script = match trusted_asset(
+        let bin = match resource_asset(
             resource_dir,
-            &service_dir.join("start.sh"),
+            "bin/model2vec-service",
             RELEASE_REQUIRES_ASSETS,
         )? {
-            Some(script) => script,
+            Some(bin) => bin,
             None => {
                 #[cfg(debug_assertions)]
                 if let Some(root) = find_workspace_root() {
-                    let workspace_service = root.join("services").join("model2vec-service");
-                    if let Some(script) =
-                        trusted_asset(&root, &workspace_service.join("start.sh"), false)?
-                    {
-                        script
+                    let debug_bin = root.join("target").join("debug").join("model2vec-service");
+                    if debug_bin.exists() {
+                        debug_bin
                     } else {
                         return Ok(());
                     }
@@ -251,8 +272,7 @@ impl SidecarSupervisor {
             }
         };
 
-        let child = Command::new("/usr/bin/bash")
-            .arg(&script)
+        let child = Command::new(&bin)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();
@@ -287,7 +307,7 @@ impl SidecarSupervisor {
         let script = service_dir.join("start.py");
         let settings = service_dir.join("settings.yml");
         let (bin, script, settings) = match (
-            trusted_asset(resource_dir, &bin, RELEASE_REQUIRES_ASSETS)?,
+            trusted_dev_interpreter(resource_dir, &bin, RELEASE_REQUIRES_ASSETS)?,
             trusted_asset(resource_dir, &script, RELEASE_REQUIRES_ASSETS)?,
             trusted_asset(resource_dir, &settings, RELEASE_REQUIRES_ASSETS)?,
         ) {
@@ -300,7 +320,7 @@ impl SidecarSupervisor {
                     let script = workspace_service.join("start.py");
                     let settings = workspace_service.join("settings.yml");
                     match (
-                        trusted_asset(&root, &bin, false)?,
+                        trusted_dev_interpreter(&root, &bin, false)?,
                         trusted_asset(&root, &script, false)?,
                         trusted_asset(&root, &settings, false)?,
                     ) {

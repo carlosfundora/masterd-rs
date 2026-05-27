@@ -7,7 +7,7 @@
 # Services managed:
 #   colbert-service  — ColBERT token-matrix reranker (port 11450)
 #   jina-service     — Jina embeddings v3 (port 11447)
-#   qwen3-service    — Qwen3-Embedding (port 11502)
+#   jina-v5-service  — Jina v5 Omni Embedding (port 11502)
 #   model2vec-service — Rust HTTP wrapper around model2vec-rs (port 11448)
 #                      started by the desktop sidecar / start.sh
 #
@@ -17,7 +17,7 @@
 #   - AMD ROCm 6.x or 7.x runtime (rocm-smi should show the GPU)
 #
 # Usage:
-#   ./scripts/setup-embedding-services.sh [--service colbert|jina|qwen3|all]
+#   ./scripts/setup-embedding-services.sh [--service colbert|jina|jina-v5|all]
 #   ./scripts/setup-embedding-services.sh jina
 #
 # Environment overrides:
@@ -169,7 +169,7 @@ install_requirements() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --service)
-      [[ $# -ge 2 ]] || die "--service requires one of: colbert, jina, qwen3, all"
+      [[ $# -ge 2 ]] || die "--service requires one of: colbert, jina, jina-v5, all"
       TARGET_SERVICE="$2"
       shift 2
       ;;
@@ -180,7 +180,7 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       cat <<'EOF'
 Usage:
-  ./scripts/setup-embedding-services.sh [--service colbert|jina|qwen3|all] [--no-prefetch]
+  ./scripts/setup-embedding-services.sh [--service colbert|jina|jina-v5|all] [--no-prefetch]
   ./scripts/setup-embedding-services.sh jina
 
 Environment:
@@ -191,7 +191,7 @@ Environment:
 EOF
       exit 0
       ;;
-    colbert|jina|qwen3|all)
+    colbert|jina|jina-v5|all)
       TARGET_SERVICE="$1"
       shift
       ;;
@@ -202,8 +202,8 @@ EOF
 done
 
 case "${TARGET_SERVICE}" in
-  colbert|jina|qwen3|all) ;;
-  *) die "unknown service: ${TARGET_SERVICE}. Use colbert, jina, qwen3, or all." ;;
+  colbert|jina|jina-v5|all) ;;
+  *) die "unknown service: ${TARGET_SERVICE}. Use colbert, jina, jina-v5, or all." ;;
 esac
 
 # Validate environment before touching anything.
@@ -540,11 +540,11 @@ if __name__ == "__main__":
 PY
 }
 
-write_qwen3_reqs() {
-  local dir="${SERVICES_DIR}/qwen3-service"
+write_jina_v5_reqs() {
+  local dir="${SERVICES_DIR}/jina-v5-service"
   mkdir -p "${dir}"
   cat > "${dir}/requirements.txt" <<'REQS'
-# Qwen3-Embedding service for MASTERd (port 11502)
+# Jina v5 Omni Embedding service for MASTERd (port 11502)
 # Packages installed from ROCm PyTorch index (no CUDA wheels).
 torch
 fastapi
@@ -556,10 +556,10 @@ safetensors
 REQS
 
   cat > "${dir}/server.py" <<'PY'
-"""Qwen3-Embedding HTTP service for MASTERd (port 11502).
+"""Jina v5 Omni Embedding HTTP service for MASTERd (port 11502).
 
 Provides:
-  POST /embed or /v1/embeddings — dense semantic embeddings (1024-dim)
+  POST /embed or /v1/embeddings — dense semantic embeddings
   GET  /health                  — health check
 """
 from __future__ import annotations
@@ -577,25 +577,36 @@ def resolve_install_path(rel_path: str) -> str:
 if "HF_HOME" not in os.environ:
     os.environ["HF_HOME"] = resolve_install_path("models/.hf_cache")
 
-app = FastAPI(title="MASTERd Qwen3 Embedding Service")
+app = FastAPI(title="MASTERd Jina v5 Omni Embedding Service")
 _model = None
 _tokenizer = None
 
 DEVICE = "cpu"
-MODEL_NAME = os.getenv("QWEN3_MODEL", "Qwen/Qwen3-Embedding")
+
+local_model_small = resolve_install_path("models/jina-v5-omni-small")
+local_model_nano = resolve_install_path("models/jina-v5-omni-nano")
+if os.path.isdir(local_model_small) and os.path.exists(os.path.join(local_model_small, "config.json")):
+    DEFAULT_MODEL = local_model_small
+elif os.path.isdir(local_model_nano) and os.path.exists(os.path.join(local_model_nano, "config.json")):
+    DEFAULT_MODEL = local_model_nano
+else:
+    DEFAULT_MODEL = "jinaai/jina-embeddings-v5-omni-nano"
+
+MODEL_NAME = os.getenv("JINA_V5_MODEL", DEFAULT_MODEL)
 
 
 @app.on_event("startup")
 async def load_model() -> None:
     global _model, _tokenizer
     from transformers import AutoTokenizer, AutoModel
-    _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    _model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE).eval()
+    _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+    _model = AutoModel.from_pretrained(MODEL_NAME, trust_remote_code=True).to(DEVICE).eval()
 
 
 class EmbedRequest(BaseModel):
     texts: list[str] = None
     input: list[str] = None
+    task: str = "text-matching"
     max_length: int = 512
     model: str = None
 
@@ -613,14 +624,20 @@ async def embed(req: EmbedRequest) -> dict:
     if texts is None:
         return {"error": "either 'input' or 'texts' is required"}
 
-    enc = _tokenizer(
-        texts, padding=True, truncation=True, max_length=req.max_length, return_tensors="pt"
-    ).to(DEVICE)
     with torch.no_grad():
-        out = _model(**enc)
-    mask = enc["attention_mask"].unsqueeze(-1).float()
-    vecs = (out.last_hidden_state * mask).sum(1) / mask.sum(1)
-    vecs = torch.nn.functional.normalize(vecs, dim=-1)
+        if hasattr(_model, "encode"):
+            vecs = _model.encode(texts, task=req.task, max_length=req.max_length)
+            if not isinstance(vecs, torch.Tensor):
+                vecs = torch.tensor(vecs)
+            vecs = torch.nn.functional.normalize(vecs, dim=-1)
+        else:
+            enc = _tokenizer(
+                texts, padding=True, truncation=True, max_length=req.max_length, return_tensors="pt"
+            ).to(DEVICE)
+            out = _model(**enc)
+            mask = enc["attention_mask"].unsqueeze(-1).float()
+            vecs = (out.last_hidden_state * mask).sum(1) / mask.sum(1)
+            vecs = torch.nn.functional.normalize(vecs, dim=-1)
     
     embeddings_list = vecs.cpu().tolist()
     data = [{"embedding": e, "index": idx, "object": "embedding"} for idx, e in enumerate(embeddings_list)]
@@ -651,10 +668,10 @@ case "${TARGET_SERVICE}" in
     setup_venv "jina-service"
     prefetch_hf_model "jina-service" "JINA_MODEL" "jinaai/jina-embeddings-v3" "1"
     ;;&
-  qwen3|all)
-    write_qwen3_reqs
-    setup_venv "qwen3-service"
-    prefetch_hf_model "qwen3-service" "QWEN3_MODEL" "Qwen/Qwen3-Embedding" "0"
+  jina-v5|all)
+    write_jina_v5_reqs
+    setup_venv "jina-v5-service"
+    prefetch_hf_model "jina-v5-service" "JINA_V5_MODEL" "jinaai/jina-embeddings-v5-omni-nano" "1"
     ;;&
 esac
 
@@ -663,7 +680,7 @@ info ""
 info "To start services individually:"
 info "  ${SERVICES_DIR}/colbert-service/.venv/bin/python ${SERVICES_DIR}/colbert-service/server.py"
 info "  ${SERVICES_DIR}/jina-service/.venv/bin/python    ${SERVICES_DIR}/jina-service/server.py"
-info "  ${SERVICES_DIR}/qwen3-service/.venv/bin/python   ${SERVICES_DIR}/qwen3-service/server.py"
+info "  ${SERVICES_DIR}/jina-v5-service/.venv/bin/python ${SERVICES_DIR}/jina-v5-service/server.py"
 info ""
 info "ROCm enforcement:"
 info "  Index   : ${ROCM_TORCH_INDEX}"

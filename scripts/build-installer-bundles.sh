@@ -356,6 +356,18 @@ else
 fi
 validate_falkor_install || masterd_die "FalkorDB graph DB files failed architecture validation"
 
+# ── model2vec-service ──────────────────────────────────────────────────────
+MODEL2VEC_BIN="${BIN_DIR}/model2vec-service"
+if [[ ! -f "${MODEL2VEC_BIN}" ]] || ! native_binary_matches_arch "${MODEL2VEC_BIN}"; then
+  printf "%b║%b  Compiling model2vec-service from source...%b\n" "${RED}" "${CYAN}" "${RESET}"
+  (cd "${ROOT_DIR}/services/model2vec-service" && cargo build --release)
+  cp "${ROOT_DIR}/target/release/model2vec-service" "${MODEL2VEC_BIN}"
+  printf "%b║%b  model2vec-service built and installed.%b\n" "${RED}" "${GREEN}" "${RESET}"
+else
+  printf "%b║%b  model2vec-service already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
+fi
+native_binary_matches_arch "${MODEL2VEC_BIN}" || masterd_die "model2vec-service binary failed architecture validation"
+
 # ── Tauri app + installer bundle ──────────────────────────────────────────
 printf "%b║%b  Compiling Tauri desktop app and producing installer...%b\n" "${RED}" "${CYAN}" "${RESET}"
 (cd "${ROOT_DIR}/apps/masterd-desktop-tauri" && cargo tauri build)

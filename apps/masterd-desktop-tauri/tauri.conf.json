@@ -37,8 +37,12 @@
       "binaries/meilisearch": "bin/meilisearch",
       "binaries/valkey-server": "bin/valkey-server",
       "binaries/falkordb-server": "bin/falkordb-server",
+      "binaries/model2vec-service": "bin/model2vec-service",
       "modules/falkordb.so": "modules/falkordb.so",
-      "../../services/searxng-service": "services/searxng-service"
+      "../../services/searxng-service": "services/searxng-service",
+      "../../services/colbert-service": "services/colbert-service",
+      "../../services/jina-service": "services/jina-service",
+      "../../services/jina-v5-service": "services/jina-v5-service"
     },
     "icon": [
       "icons/icon.png"

@@ -24,7 +24,7 @@ app = FastAPI(title="MASTERd ColBERT Service")
 _model = None
 _tokenizer = None
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cpu"
 
 local_model = resolve_install_path("models/lfm2-colbert-350m")
 if os.path.isdir(local_model) and os.path.exists(os.path.join(local_model, "tokenizer.json")):

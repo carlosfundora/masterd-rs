@@ -8,11 +8,11 @@ use sha2::{Digest, Sha256};
 // Ported from local WIP embedding-service patterns.
 pub const COLBERT_WRAPPER_DEFAULT_URL: &str = "http://127.0.0.1:11450";
 pub const JINA_DEFAULT_URL: &str = "http://127.0.0.1:11447";
-pub const QWEN3_DEFAULT_URL: &str = "http://127.0.0.1:11502";
+pub const JINA_V5_DEFAULT_URL: &str = "http://127.0.0.1:11502";
 
 pub const COLBERT_WRAPPER_MODEL: &str = "colbert-lfm2-305m";
 pub const JINA_MODEL: &str = "jina-code-embed";
-pub const QWEN3_MODEL: &str = "qwen3-embedding";
+pub const JINA_V5_MODEL: &str = "jina-v5-omni";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeTuning {
@@ -57,10 +57,10 @@ pub struct LocalEmbeddingStack {
     pub backend: InferenceBackend,
     pub colbert_url: String,
     pub jina_url: String,
-    pub qwen3_url: String,
+    pub jina_v5_url: String,
     pub colbert_model: String,
     pub jina_model: String,
-    pub qwen3_model: String,
+    pub jina_v5_model: String,
     pub tuning: RuntimeTuning,
 }
 
@@ -80,14 +80,14 @@ impl LocalEmbeddingStack {
                 .unwrap_or_else(|_| COLBERT_WRAPPER_DEFAULT_URL.to_string()),
             jina_url: std::env::var("MEMORYBANK_JINA_URL")
                 .unwrap_or_else(|_| JINA_DEFAULT_URL.to_string()),
-            qwen3_url: std::env::var("MEMORYBANK_QWEN3_URL")
-                .unwrap_or_else(|_| QWEN3_DEFAULT_URL.to_string()),
+            jina_v5_url: std::env::var("MEMORYBANK_JINA_V5_URL")
+                .unwrap_or_else(|_| JINA_V5_DEFAULT_URL.to_string()),
             colbert_model: std::env::var("MEMORYBANK_COLBERT_WRAPPER_MODEL")
                 .unwrap_or_else(|_| COLBERT_WRAPPER_MODEL.to_string()),
             jina_model: std::env::var("MEMORYBANK_JINA_MODEL")
                 .unwrap_or_else(|_| JINA_MODEL.to_string()),
-            qwen3_model: std::env::var("MEMORYBANK_QWEN3_MODEL")
-                .unwrap_or_else(|_| QWEN3_MODEL.to_string()),
+            jina_v5_model: std::env::var("MEMORYBANK_JINA_V5_MODEL")
+                .unwrap_or_else(|_| JINA_V5_MODEL.to_string()),
             tuning: RuntimeTuning::from_env(),
         }
     }
@@ -132,7 +132,7 @@ pub struct EngineBench {
 #[serde(rename_all = "snake_case")]
 pub enum ExtractionProvider {
     Jina,
-    Qwen3,
+    JinaV5,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,7 +158,7 @@ impl Default for ExtractionFallbackPolicy {
                     min_score: 0.65,
                 },
                 ExtractionStagePolicy {
-                    provider: ExtractionProvider::Qwen3,
+                    provider: ExtractionProvider::JinaV5,
                     max_retries: 2,
                     min_score: 0.60,
                 },
@@ -215,7 +215,7 @@ impl EmbeddedEngine {
         for url in [
             &self.cfg.colbert_url,
             &self.cfg.jina_url,
-            &self.cfg.qwen3_url,
+            &self.cfg.jina_v5_url,
         ] {
             let resp = self
                 .client
@@ -233,8 +233,8 @@ impl EmbeddedEngine {
         self.embed_jina_fast(texts)
     }
 
-    pub fn embed_qwen3(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        self.embed_generic(&self.cfg.qwen3_url, &self.cfg.qwen3_model, texts)
+    pub fn embed_jina_v5(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.embed_generic(&self.cfg.jina_v5_url, &self.cfg.jina_v5_model, texts)
     }
 
     pub fn embed_jina_fast(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -262,8 +262,8 @@ impl EmbeddedEngine {
         self.execute_extraction_policy(texts, &ExtractionFallbackPolicy::default())
     }
 
-    pub fn embed_qwen3_fast(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        self.embed_generic_batched(&self.cfg.qwen3_url, &self.cfg.qwen3_model, texts)
+    pub fn embed_jina_v5_fast(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.embed_generic_batched(&self.cfg.jina_v5_url, &self.cfg.jina_v5_model, texts)
     }
 
     fn embed_generic(
@@ -511,8 +511,8 @@ impl EmbeddedEngine {
             ExtractionProvider::Jina => {
                 self.embed_generic_batched(&self.cfg.jina_url, &self.cfg.jina_model, texts)
             }
-            ExtractionProvider::Qwen3 => {
-                self.embed_generic_batched(&self.cfg.qwen3_url, &self.cfg.qwen3_model, texts)
+            ExtractionProvider::JinaV5 => {
+                self.embed_generic_batched(&self.cfg.jina_v5_url, &self.cfg.jina_v5_model, texts)
             }
         }
     }
