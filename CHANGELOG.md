@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-05-27
+
+### Added
+- Implemented settings validation in Tauri command `settings_save` to enforce safe bounds on generation temperature, safety confidence percent, and BM25 top K.
+- Integrated exponential backoff retry and stale lock cleanup to the `AtomicHashIndexService` advisory locking mechanism.
+
+### Changed
+- Refactored Tauri desktop service health queries to use non-blocking `reqwest::Client` probes executed concurrently via `tokio::join!`, replacing blocking HTTP calls.
+- Refactored `intake_add_files` command to run ingestion inside `tokio::task::spawn_blocking` and return robust error/fallback results.
+- Added E0382 safety improvements in the `preferences_draft_policy` command to clone arguments before sending to database worker thread.
+- Added checking checks to the `install.sh` python setup helper to verify installation success.
+- Added `chrono` formatting support to log entries.
+
 ## [0.1.2] - 2026-05-27
 
 ### Added
