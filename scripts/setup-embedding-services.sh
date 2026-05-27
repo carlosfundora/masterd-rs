@@ -8,6 +8,8 @@
 #   colbert-service  — ColBERT token-matrix reranker (port 11450)
 #   jina-service     — Jina embeddings v3 (port 11447)
 #   qwen3-service    — Qwen3-Embedding (port 11502)
+#   model2vec-service — Rust HTTP wrapper around model2vec-rs (port 11448)
+#                      started by the desktop sidecar / start.sh
 #
 # Prerequisites:
 #   - Python 3.12 available
@@ -185,6 +187,7 @@ Environment:
   HF_TOKEN     Optional Hugging Face token for gated/private models.
   HF_HOME      Optional local Hugging Face cache root.
   PYTHON_BIN   Python interpreter, default python3.12, fallback python3/uv.
+  model2vec-service is Rust-based and does not use this Python venv script.
 EOF
       exit 0
       ;;

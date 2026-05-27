@@ -12,7 +12,7 @@ MASTERd is a fully Rust-first document intelligence platform with a Tauri deskto
 - **Multi-stage ingestion pipeline** — hash → hot-cache → dedup → canonical SQLite write → LanceDB vector snapshot → Meilisearch lexical index → ColBERT rerank queue → Falkor graph mirror
 - **Embedded GGUF inference** — LFM2.5-1.2B-Thinking and LFM2.5-350M-Instruct bundled as `include_bytes!` assets, loaded via llama.cpp; Ollama fallback when models are unavailable
 - **ColBERT MaxSim reranker** — L2-normalized token-matrix reranking (correct cosine similarity, not raw dot product)
-- **Python embedding services** — FastAPI servers for ColBERT and Jina v3; setup script enforces AMD ROCm PyTorch index
+- **Embedding services** — FastAPI ColBERT/Jina v3 servers plus a Rust `model2vec-service` wrapper; setup script enforces AMD ROCm PyTorch index
 - **Rust static embeddings** — vendored `model2vec-rs` provides a fast local embedding path and structural fallback
 - **Supervised sidecar processes** — Meilisearch and Valkey managed by `SidecarSupervisor`, with optional FalkorDB graph module
 - **AMD ROCm–first** — all Python installs routed through ROCm PyTorch index; CUDA wheels blocked by `config/rocm-constraints.txt`
@@ -50,7 +50,7 @@ models/
 services/
   colbert-service/         ← FastAPI ColBERT HTTP server (port 11450)
   jina-service/            ← FastAPI Jina v3 HTTP server (port 11447)
-  model2vec-rs/            ← Vendored Rust static-embedding crate (local fallback)
+  model2vec-service/       ← Rust HTTP wrapper around model2vec-rs (port 11448)
 
 vendor/
   candle/                  ← Hugging Face Candle ML framework (vendored)
@@ -132,7 +132,7 @@ Pipeline stages (configurable in `config/pipeline.toml`):
 The live embedding stack uses Jina as the primary service path and vendored `model2vec-rs` as a fast local parallel source. The main installer sets up the Jina service by default, and all Python installs are routed through the AMD ROCm PyTorch index — no CUDA wheels are permitted.
 
 > [!NOTE]
-> Whenever the desktop app is launched, it automatically starts the embedding services (ColBERT, Jina) as supervised processes, keeps the local `model2vec-rs` path available, and preloads the embedded LFM2.5 thinking and instruct models. This happens from both `pnpm dev` at the repo root and `cargo tauri dev` inside `apps/masterd-desktop-tauri`.
+> Whenever the desktop app is launched, it automatically starts the embedding services (ColBERT, Jina, model2vec-service) as supervised processes, keeps the local `model2vec-rs` path available, and preloads the embedded LFM2.5 thinking and instruct models. This happens from both `pnpm dev` at the repo root and `cargo tauri dev` inside `apps/masterd-desktop-tauri`.
 > 
 > You can also start the services manually for CLI tools or development:
 
@@ -146,6 +146,7 @@ MASTERD_SKIP_EMBEDDING_SERVICES=1 ./scripts/build-installer-bundles.sh
 # Start a service manually
 services/colbert-service/.venv/bin/python services/colbert-service/server.py
 services/jina-service/.venv/bin/python    services/jina-service/server.py
+bash services/model2vec-service/start.sh
 ```
 
 Service endpoints (when running):
@@ -153,7 +154,7 @@ Service endpoints (when running):
 |---------|------|------|
 | ColBERT | 11450 | Token-matrix reranking |
 | Jina v3 | 11447 | Dense code/text embeddings |
-| model2vec-rs | local | Fast static embeddings / structural fallback |
+| model2vec-service | 11448 | Fast static embeddings / structural fallback |
 
 Switch backend in `config/embedding_engine.toml` or env vars:
 ```bash

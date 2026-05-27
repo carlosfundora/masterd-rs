@@ -223,11 +223,15 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
 
     let colbert_url = config.colbert_url;
     let jina_url = config.jina_url;
+    let model2vec_url = "http://127.0.0.1:11448".to_string();
 
     let colbert_health = tokio::task::spawn_blocking(move || check_service_health(&colbert_url))
         .await
         .unwrap_or_else(|_| "offline".to_string());
     let jina_health = tokio::task::spawn_blocking(move || check_service_health(&jina_url))
+        .await
+        .unwrap_or_else(|_| "offline".to_string());
+    let model2vec_health = tokio::task::spawn_blocking(move || check_service_health(&model2vec_url))
         .await
         .unwrap_or_else(|_| "offline".to_string());
     Ok(ok(SystemStatus {
@@ -237,6 +241,7 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
             ModelStatus { id: "lfm2.5-instruct".into(), name: "LFM2.5 350M Instruct".into(), role: "classification".into(), status: if instruct_loaded { "online".into() } else { "offline".into() } },
             ModelStatus { id: "colbert-reranker".into(), name: "ColBERT 350M Reranker".into(), role: "reranking".into(), status: colbert_health },
             ModelStatus { id: "jina-embedding".into(), name: "Jina v3 Embedding".into(), role: "embedding".into(), status: jina_health },
+            ModelStatus { id: "model2vec-fallback".into(), name: "model2vec-rs".into(), role: "embedding".into(), status: model2vec_health },
         ],
         queues: QueueCounts {
             pending: pending as u32,

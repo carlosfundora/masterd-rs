@@ -11,6 +11,7 @@
 //!   <resource_dir>/bin/falkordb-server
 //!   <resource_dir>/modules/falkordb.so
 //!   <resource_dir>/services/searxng-service/.venv/bin/python
+//!   <workspace_root>/services/model2vec-service/start.sh
 //!
 //! Data directories are provisioned inside the app's data_dir:
 //!   <data_dir>/meilisearch/
@@ -49,7 +50,8 @@ pub struct SidecarSupervisor {
 fn find_workspace_root() -> Option<PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
-        if dir.join("services").join("colbert-service").exists() {
+        let services = dir.join("services");
+        if services.join("colbert-service").exists() || services.join("model2vec-service").exists() {
             return Some(dir);
         }
         if let Some(parent) = dir.parent() {
@@ -73,26 +75,27 @@ impl SidecarSupervisor {
         self.start_valkey(resource_dir, data_dir);
         self.start_falkordb(resource_dir, data_dir);
         self.start_searxng(resource_dir);
-        self.start_python_services();
+        self.start_embedding_services(resource_dir);
     }
 
-    fn start_python_services(&self) {
-        let procs = self.procs.lock().unwrap();
-        if procs.iter().any(|p| p.name == "colbert-service" || p.name == "jina-service") {
-            return;
-        }
-        drop(procs);
-
+    fn start_embedding_services(&self, resource_dir: &Path) {
         if let Some(root) = find_workspace_root() {
-            info!("found workspace root at {}, starting python embedding services...", root.display());
+            info!("found workspace root at {}, starting embedding services...", root.display());
             self.start_python_service("colbert-service", &root, 11450);
             self.start_python_service("jina-service", &root, 11447);
+            self.start_model2vec_service(resource_dir, &root);
         } else {
-            warn!("could not locate workspace root, python embedding services will not be started automatically");
+            warn!("could not locate workspace root, embedding services will not be started automatically");
         }
     }
 
     fn start_python_service(&self, name: &'static str, root: &Path, port: u16) {
+        let procs = self.procs.lock().unwrap();
+        if procs.iter().any(|p| p.name == name) {
+            return;
+        }
+        drop(procs);
+
         let service_dir = root.join("services").join(name);
         let bin = service_dir.join(".venv").join("bin").join("python");
         let script = service_dir.join("server.py");
@@ -119,6 +122,42 @@ impl SidecarSupervisor {
             }
             Err(e) => {
                 warn!("failed to start {name}: {e}");
+            }
+        }
+    }
+
+    fn start_model2vec_service(&self, resource_dir: &Path, root: &Path) {
+        let procs = self.procs.lock().unwrap();
+        if procs.iter().any(|p| p.name == "model2vec-service") {
+            return;
+        }
+        drop(procs);
+
+        let packaged = resource_dir.join("services").join("model2vec-service");
+        let workspace = root.join("services").join("model2vec-service");
+        let service_dir = if packaged.join("start.sh").exists() {
+            packaged
+        } else if workspace.join("start.sh").exists() {
+            workspace
+        } else {
+            info!("model2vec-service not found in resources or workspace, skipping");
+            return;
+        };
+
+        let script = service_dir.join("start.sh");
+        let child = Command::new("bash")
+            .arg(&script)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+
+        match child {
+            Ok(c) => {
+                info!("model2vec-service started on 127.0.0.1:11448");
+                self.procs.lock().unwrap().push(ManagedProcess { name: "model2vec-service", child: c });
+            }
+            Err(e) => {
+                warn!("failed to start model2vec-service: {e}");
             }
         }
     }
