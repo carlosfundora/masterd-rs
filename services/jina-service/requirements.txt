@@ -1,0 +1,11 @@
+# Jina embeddings service for MASTERd (port 11447)
+# Packages installed from ROCm PyTorch index (no CUDA wheels).
+torch
+fastapi
+uvicorn[standard]
+transformers
+sentence-transformers
+einops
+sentencepiece
+huggingface-hub
+safetensors
