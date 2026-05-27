@@ -25,7 +25,7 @@ struct Cli {
     #[arg(long, default_value = "lfm2.5-1.2b-thinking")]
     chat_model: String,
     /// Write JSON validation report here.
-    #[arg(long, default_value = "data/engine_validation.json")]
+    #[arg(long, default_value = "data/benchmarks/engine_validation.json")]
     output: String,
     /// Run the real corpus benchmark (temp ingestion + CPU chat runs).
     #[arg(long, default_value_t = false)]
@@ -37,7 +37,7 @@ struct Cli {
     #[arg(long, default_value = "/home/local/Documents/pdf batch")]
     pdf_root: PathBuf,
     /// Write the benchmark report here.
-    #[arg(long, default_value = "data/real_benchmarks.json")]
+    #[arg(long, default_value = "data/benchmarks/real_benchmarks.json")]
     benchmark_output: String,
 }
 
