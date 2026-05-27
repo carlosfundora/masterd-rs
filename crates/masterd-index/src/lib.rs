@@ -11,8 +11,8 @@ pub mod bm25;
 pub mod colbert;
 pub mod dedup;
 pub mod local_index;
-pub mod snapshot;
 pub mod semantic;
+pub mod snapshot;
 
 pub use bm25::BM25Okapi;
 pub use colbert::{maxsim, rerank};

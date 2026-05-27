@@ -502,7 +502,11 @@ impl EmbeddedEngine {
         })
     }
 
-    fn embed_for_provider(&self, provider: ExtractionProvider, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+    fn embed_for_provider(
+        &self,
+        provider: ExtractionProvider,
+        texts: &[String],
+    ) -> Result<Vec<Vec<f32>>> {
         match provider {
             ExtractionProvider::Jina => {
                 self.embed_generic_batched(&self.cfg.jina_url, &self.cfg.jina_model, texts)
@@ -513,13 +517,21 @@ impl EmbeddedEngine {
         }
     }
 
-    fn score_embedding_quality(embeddings: &[Vec<f32>]) -> std::result::Result<f32, (&'static str, String)> {
+    fn score_embedding_quality(
+        embeddings: &[Vec<f32>],
+    ) -> std::result::Result<f32, (&'static str, String)> {
         if embeddings.is_empty() {
-            return Err(("empty_embeddings", "candidate produced no embeddings".to_string()));
+            return Err((
+                "empty_embeddings",
+                "candidate produced no embeddings".to_string(),
+            ));
         }
         let dim = embeddings[0].len();
         if dim == 0 {
-            return Err(("empty_vector", "candidate produced empty vectors".to_string()));
+            return Err((
+                "empty_vector",
+                "candidate produced empty vectors".to_string(),
+            ));
         }
         if embeddings.iter().any(|row| row.len() != dim) {
             return Err((
@@ -544,7 +556,10 @@ impl EmbeddedEngine {
             .sum::<f32>()
             / embeddings.len() as f32;
         if avg_norm == 0.0 {
-            return Err(("zero_norm", "candidate embeddings have zero norm".to_string()));
+            return Err((
+                "zero_norm",
+                "candidate embeddings have zero norm".to_string(),
+            ));
         }
         let norm_component = (1.0 / (1.0 + (avg_norm - 1.0).abs())).clamp(0.0, 1.0);
         let dim_component = (dim as f32 / 1536.0).clamp(0.0, 1.0);

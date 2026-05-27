@@ -17,9 +17,13 @@ fn normalize_rows(matrix: &mut Vec<f32>, n_tokens: usize, dim: usize) {
     for row in matrix.chunks_mut(dim).take(n_tokens) {
         let norm: f32 = row.iter().map(|v| v * v).sum::<f32>().sqrt();
         if norm > 1e-9 {
-            for v in row.iter_mut() { *v /= norm; }
+            for v in row.iter_mut() {
+                *v /= norm;
+            }
         } else {
-            for v in row.iter_mut() { *v = 0.0; }
+            for v in row.iter_mut() {
+                *v = 0.0;
+            }
         }
     }
 }
@@ -33,13 +37,7 @@ fn normalize_rows(matrix: &mut Vec<f32>, n_tokens: usize, dim: usize) {
 /// `doc`:   flat f32 slice of `d_tokens × dim`
 ///
 /// Returns the sum of per-query-token max cosine similarities.
-pub fn maxsim(
-    query: &[f32],
-    q_tokens: usize,
-    doc: &[f32],
-    d_tokens: usize,
-    dim: usize,
-) -> f32 {
+pub fn maxsim(query: &[f32], q_tokens: usize, doc: &[f32], d_tokens: usize, dim: usize) -> f32 {
     if dim == 0 || q_tokens == 0 || d_tokens == 0 {
         return f32::NEG_INFINITY;
     }
@@ -182,7 +180,11 @@ mod tests {
             dim: 2,
         }];
         let scored = rerank(&[3.0, 4.0], 1, 2, docs);
-        assert!((scored[0].1 - 1.0).abs() < 1e-4, "expected cosine ~1.0, got {}", scored[0].1);
+        assert!(
+            (scored[0].1 - 1.0).abs() < 1e-4,
+            "expected cosine ~1.0, got {}",
+            scored[0].1
+        );
     }
 
     #[test]

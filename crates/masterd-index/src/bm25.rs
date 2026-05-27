@@ -86,7 +86,15 @@ impl BM25Okapi {
             idf.insert(word, eps_floor);
         }
 
-        Self { corpus_size, avgdl, doc_freqs, idf, doc_len, k1, b }
+        Self {
+            corpus_size,
+            avgdl,
+            doc_freqs,
+            idf,
+            doc_len,
+            k1,
+            b,
+        }
     }
 
     /// Score a query against all documents.  Returns (doc_index, score) sorted descending.

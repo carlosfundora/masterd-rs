@@ -67,7 +67,11 @@ impl OllamaBackend {
             .timeout(std::time::Duration::from_secs(180))
             .build()
             .context("build ollama reqwest client")?;
-        Ok(Self { base_url, model, client })
+        Ok(Self {
+            base_url,
+            model,
+            client,
+        })
     }
 
     /// `true` if the Ollama daemon is reachable and has at least one model loaded.
@@ -102,21 +106,31 @@ impl OllamaBackend {
         citations: Vec<WebResult>,
         tx: mpsc::Sender<ChatToken>,
     ) -> Result<()> {
-        let model = self.resolve_model().await.unwrap_or_else(|| self.model.clone());
+        let model = self
+            .resolve_model()
+            .await
+            .unwrap_or_else(|| self.model.clone());
         debug!(model = %model, url = %self.base_url, "ollama fallback chat_stream");
 
         let req = OllamaChatReq {
             model: &model,
             messages: vec![
-                OllamaMsg { role: "system", content: system_prompt },
-                OllamaMsg { role: "user",   content: user_message },
+                OllamaMsg {
+                    role: "system",
+                    content: system_prompt,
+                },
+                OllamaMsg {
+                    role: "user",
+                    content: user_message,
+                },
             ],
             // Non-streaming: receive entire response as one JSON blob, then
             // fan out word-by-word to the channel for pseudo-streaming UX.
             stream: false,
         };
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(format!("{}/api/chat", self.base_url.trim_end_matches('/')))
             .json(&req)
             .send()
@@ -136,16 +150,27 @@ impl OllamaBackend {
         // same way it would from the embedded engine.
         let mut count = 0usize;
         for chunk in text.split_inclusive(|c: char| c.is_whitespace()) {
-            if count >= max_tokens { break; }
+            if count >= max_tokens {
+                break;
+            }
             count += 1;
-            if tx.send(ChatToken::Response(chunk.to_string())).await.is_err() {
+            if tx
+                .send(ChatToken::Response(chunk.to_string()))
+                .await
+                .is_err()
+            {
                 warn!("ollama: frontend channel closed mid-stream");
                 break;
             }
         }
 
         let model_badge = format!("ollama/{model}");
-        let _ = tx.send(ChatToken::Done { model: model_badge, citations }).await;
+        let _ = tx
+            .send(ChatToken::Done {
+                model: model_badge,
+                citations,
+            })
+            .await;
         Ok(())
     }
 }

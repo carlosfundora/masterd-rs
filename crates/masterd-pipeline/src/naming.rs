@@ -22,11 +22,8 @@ pub struct NamingRuleMatch {
 impl NamingRuleMatch {
     pub fn matches(&self, path: &Path, ext_lower: &str) -> bool {
         // Extension check: if extensions list is non-empty, must be in list.
-        let ext_ok = self.extensions.is_empty()
-            || self
-                .extensions
-                .iter()
-                .any(|e| e.as_str() == ext_lower);
+        let ext_ok =
+            self.extensions.is_empty() || self.extensions.iter().any(|e| e.as_str() == ext_lower);
         if !ext_ok {
             return false;
         }
@@ -99,7 +96,8 @@ pub struct NamingRouter {
 impl NamingRouter {
     /// Build a resolver from an already-parsed rule pack.
     pub fn from_pack(mut pack: NamingRulePack) -> Self {
-        pack.rules.sort_by(|a, b| b.priority.cmp(&a.priority).then(a.id.cmp(&b.id)));
+        pack.rules
+            .sort_by(|a, b| b.priority.cmp(&a.priority).then(a.id.cmp(&b.id)));
         Self { rules: pack.rules }
     }
 
@@ -160,10 +158,7 @@ impl NamingRouter {
             .and_then(|s| s.to_str())
             .map(|s| s.to_ascii_lowercase())
             .unwrap_or_default();
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("file");
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
         let ext_with_dot = if ext_lower.is_empty() {
             String::new()
         } else {
@@ -321,8 +316,7 @@ mod tests {
             name_template: "{stem}_{hash8}{ext}".to_string(),
             tags: vec![],
         };
-        let router =
-            NamingRouter::from_pack(make_pack(vec![special, pdf_rule(), default_rule()]));
+        let router = NamingRouter::from_pack(make_pack(vec![special, pdf_rule(), default_rule()]));
 
         let invoice = Path::new("/input/invoices/inv001.pdf");
         assert_eq!(

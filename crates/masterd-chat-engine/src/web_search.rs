@@ -28,11 +28,7 @@ impl WebSearchBackend {
         let resp = self
             .client
             .get(&url)
-            .query(&[
-                ("q", query),
-                ("format", "json"),
-                ("pageno", "1"),
-            ])
+            .query(&[("q", query), ("format", "json"), ("pageno", "1")])
             .send()
             .await;
 
@@ -55,8 +51,8 @@ impl WebSearchBackend {
             .into_iter()
             .take(num_results)
             .map(|r| WebResult {
-                title:   r.title.unwrap_or_default(),
-                url:     r.url,
+                title: r.title.unwrap_or_default(),
+                url: r.url,
                 snippet: r.content.unwrap_or_default(),
             })
             .collect();

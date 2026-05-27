@@ -219,11 +219,11 @@ impl IngestStageRuntime {
                     stage,
                     state: StageTransitionState::Cancelled,
                 });
-                if let Some(err) =
-                    rollback_stages(rollback, &mut context, std::iter::once(stage).chain(
-                        completed_stages.iter().rev().copied(),
-                    ))
-                {
+                if let Some(err) = rollback_stages(
+                    rollback,
+                    &mut context,
+                    std::iter::once(stage).chain(completed_stages.iter().rev().copied()),
+                ) {
                     transitions.push(StageTransition {
                         stage: err.stage,
                         state: StageTransitionState::NonRetryableFailure,
@@ -260,11 +260,11 @@ impl IngestStageRuntime {
                         stage,
                         state: StageTransitionState::RetryableFailure,
                     });
-                    if let Some(rollback_err) =
-                        rollback_stages(rollback, &mut context, std::iter::once(stage).chain(
-                            completed_stages.iter().rev().copied(),
-                        ))
-                    {
+                    if let Some(rollback_err) = rollback_stages(
+                        rollback,
+                        &mut context,
+                        std::iter::once(stage).chain(completed_stages.iter().rev().copied()),
+                    ) {
                         transitions.push(StageTransition {
                             stage: rollback_err.stage,
                             state: StageTransitionState::NonRetryableFailure,
@@ -284,11 +284,11 @@ impl IngestStageRuntime {
                         stage,
                         state: StageTransitionState::NonRetryableFailure,
                     });
-                    if let Some(rollback_err) =
-                        rollback_stages(rollback, &mut context, std::iter::once(stage).chain(
-                            completed_stages.iter().rev().copied(),
-                        ))
-                    {
+                    if let Some(rollback_err) = rollback_stages(
+                        rollback,
+                        &mut context,
+                        std::iter::once(stage).chain(completed_stages.iter().rev().copied()),
+                    ) {
                         transitions.push(StageTransition {
                             stage: rollback_err.stage,
                             state: StageTransitionState::NonRetryableFailure,
@@ -311,7 +311,8 @@ impl IngestStageRuntime {
                     if let Some(rollback_err) = rollback_stages(
                         rollback,
                         &mut context,
-                        std::iter::once(cancelled.stage).chain(completed_stages.iter().rev().copied()),
+                        std::iter::once(cancelled.stage)
+                            .chain(completed_stages.iter().rev().copied()),
                     ) {
                         transitions.push(StageTransition {
                             stage: rollback_err.stage,
@@ -515,7 +516,12 @@ mod tests {
         let cancel = CancellationSource::new();
         cancel.cancel("operator_requested");
 
-        let out = runtime.execute_with_control(&executor, FakeContext::default(), &cancel.token(), &mut rollback);
+        let out = runtime.execute_with_control(
+            &executor,
+            FakeContext::default(),
+            &cancel.token(),
+            &mut rollback,
+        );
         assert!(matches!(
             out.result,
             StageResult::Cancelled(StageCancellation { reason, .. }) if reason == "operator_requested"
@@ -542,7 +548,12 @@ mod tests {
         let mut rollback = RecordingRollback::default();
         let cancel = CancellationSource::new();
 
-        let out = runtime.execute_with_control(&executor, FakeContext::default(), &cancel.token(), &mut rollback);
+        let out = runtime.execute_with_control(
+            &executor,
+            FakeContext::default(),
+            &cancel.token(),
+            &mut rollback,
+        );
         assert!(matches!(out.result, StageResult::Cancelled(_)));
         assert_eq!(
             rollback.take(),

@@ -82,13 +82,13 @@ fn main() -> Result<()> {
     // Use embedded config unless caller provides an override path.
     let sidecars = match &args.config {
         Some(path) => SidecarConfig::from_path(path)?,
-        None       => SidecarConfig::embedded()?,
+        None => SidecarConfig::embedded()?,
     };
     sidecars.validate_foundation()?;
 
     let pipeline_raw = match &args.pipeline_config {
         Some(path) => std::fs::read_to_string(path)?,
-        None       => DEFAULT_PIPELINE_TOML.to_string(),
+        None => DEFAULT_PIPELINE_TOML.to_string(),
     };
     let pipeline: PipelineConfig = toml::from_str(&pipeline_raw)?;
 

@@ -106,10 +106,7 @@ impl ReviewQueueEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CorrectionEvent {
     /// Operator accepted the canonical name and route assigned by the pipeline.
-    Accepted {
-        doc_id: String,
-        operator_id: String,
-    },
+    Accepted { doc_id: String, operator_id: String },
     /// Operator overrode the canonical name.
     NameOverridden {
         doc_id: String,
@@ -131,10 +128,7 @@ pub enum CorrectionEvent {
         operator_id: String,
     },
     /// Operator deleted the document from the review queue.
-    Deleted {
-        doc_id: String,
-        operator_id: String,
-    },
+    Deleted { doc_id: String, operator_id: String },
 }
 
 impl CorrectionEvent {

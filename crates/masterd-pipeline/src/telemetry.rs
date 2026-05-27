@@ -38,7 +38,10 @@ impl FailureClass {
 
     /// Returns `true` when automatic retry is safe for this class.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, FailureClass::TransientIo | FailureClass::DependencyUnavailable)
+        matches!(
+            self,
+            FailureClass::TransientIo | FailureClass::DependencyUnavailable
+        )
     }
 }
 

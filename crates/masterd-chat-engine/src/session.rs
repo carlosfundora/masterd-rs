@@ -11,8 +11,8 @@ pub enum Role {
 impl Role {
     fn as_str(self) -> &'static str {
         match self {
-            Role::System    => "system",
-            Role::User      => "user",
+            Role::System => "system",
+            Role::User => "user",
             Role::Assistant => "assistant",
         }
     }

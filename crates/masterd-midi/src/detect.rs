@@ -3,9 +3,9 @@
 //! Probes PATH for known MIDI player binaries in priority order.
 //! Each variant knows its own CLI invocation signature.
 
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use anyhow::Result;
 
 /// A locally installed MIDI player binary.
 #[derive(Debug, Clone)]
@@ -26,10 +26,10 @@ impl SystemPlayer {
     pub fn name(&self) -> &'static str {
         match self {
             Self::FluidSynth { .. } => "fluidsynth",
-            Self::Timidity { .. }   => "timidity",
-            Self::Aplaymidi { .. }  => "aplaymidi",
-            Self::Pmidi { .. }      => "pmidi",
-            Self::WildMidi { .. }   => "wildmidi",
+            Self::Timidity { .. } => "timidity",
+            Self::Aplaymidi { .. } => "aplaymidi",
+            Self::Pmidi { .. } => "pmidi",
+            Self::WildMidi { .. } => "wildmidi",
         }
     }
 
@@ -38,20 +38,28 @@ impl SystemPlayer {
         let path_str = midi_path.to_string_lossy();
         match self {
             Self::FluidSynth { bin, sf2 } => {
-                let sf = sf2.as_deref()
+                let sf = sf2
+                    .as_deref()
                     .and_then(|p| p.to_str())
                     .unwrap_or_else(|| best_system_sf2());
                 Command::new(bin)
-                    .args(["-a", "pulseaudio", "-m", "alsa_seq", "-l", "-i", sf, &path_str])
+                    .args([
+                        "-a",
+                        "pulseaudio",
+                        "-m",
+                        "alsa_seq",
+                        "-l",
+                        "-i",
+                        sf,
+                        &path_str,
+                    ])
                     .spawn()
                     .map_err(|e| anyhow::anyhow!("fluidsynth spawn: {e}"))
             }
-            Self::Timidity { bin } => {
-                Command::new(bin)
-                    .arg(&*path_str)
-                    .spawn()
-                    .map_err(|e| anyhow::anyhow!("timidity spawn: {e}"))
-            }
+            Self::Timidity { bin } => Command::new(bin)
+                .arg(&*path_str)
+                .spawn()
+                .map_err(|e| anyhow::anyhow!("timidity spawn: {e}")),
             Self::Aplaymidi { bin } => {
                 // Find the first writable ALSA sequencer port.
                 let port = detect_alsa_port().unwrap_or_else(|| "128:0".to_string());
@@ -67,12 +75,10 @@ impl SystemPlayer {
                     .spawn()
                     .map_err(|e| anyhow::anyhow!("pmidi spawn: {e}"))
             }
-            Self::WildMidi { bin } => {
-                Command::new(bin)
-                    .arg(&*path_str)
-                    .spawn()
-                    .map_err(|e| anyhow::anyhow!("wildmidi spawn: {e}"))
-            }
+            Self::WildMidi { bin } => Command::new(bin)
+                .arg(&*path_str)
+                .spawn()
+                .map_err(|e| anyhow::anyhow!("wildmidi spawn: {e}")),
         }
     }
 }
@@ -125,13 +131,15 @@ const SYSTEM_SF2_PATHS: &[&str] = &[
 ];
 
 fn best_system_sf2_path() -> Option<PathBuf> {
-    SYSTEM_SF2_PATHS.iter()
+    SYSTEM_SF2_PATHS
+        .iter()
         .map(PathBuf::from)
         .find(|p| p.exists())
 }
 
 fn best_system_sf2() -> &'static str {
-    SYSTEM_SF2_PATHS.iter()
+    SYSTEM_SF2_PATHS
+        .iter()
         .copied()
         .find(|p| std::path::Path::new(p).exists())
         .unwrap_or("/usr/share/sounds/sf2/FluidR3_GM.sf2")

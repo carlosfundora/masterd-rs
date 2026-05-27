@@ -62,7 +62,11 @@ impl RagContextBuilder {
             if !local.is_empty() {
                 let mut block = String::from("[INDEXED DOCUMENTS]\n");
                 for (i, r) in local.iter().enumerate() {
-                    let path_hint = r.path.as_deref().map(|p| format!(" ({p})")).unwrap_or_default();
+                    let path_hint = r
+                        .path
+                        .as_deref()
+                        .map(|p| format!(" ({p})"))
+                        .unwrap_or_default();
                     block.push_str(&format!(
                         "[{}] doc:{}{} — score:{:.2}\n{}\n",
                         i + 1,
@@ -124,7 +128,9 @@ impl RagContextBuilder {
 /// Deduplicate web results using `DocumentDeduper` (URL, title, content hash).
 fn deduplicate_web_results(results: Vec<WebResult>) -> Vec<WebResult> {
     let mut deduper = DocumentDeduper::new();
-    deduper.filter(results, |r| (r.url.as_str(), r.title.as_str(), r.snippet.as_str()))
+    deduper.filter(results, |r| {
+        (r.url.as_str(), r.title.as_str(), r.snippet.as_str())
+    })
 }
 
 impl Default for RagContextBuilder {

@@ -21,17 +21,17 @@ pub mod telemetry;
 
 pub use naming::{NamingRouter, NamingRouterError, NamingRulePack, RoutingDecision};
 pub use retrieval::{
-    NoopRetrievalStage, QueryIntent, QueryPlan, RerankerHook, RetrievalCandidate,
-    RetrievalError, RetrievalPipeline, RetrievalResult, RetrievalStage,
-};
-pub use telemetry::{
-    FailureClass, PipelineTelemetryReport, StageDuration, StageFailureEvent, StageTimer,
+    NoopRetrievalStage, QueryIntent, QueryPlan, RerankerHook, RetrievalCandidate, RetrievalError,
+    RetrievalPipeline, RetrievalResult, RetrievalStage,
 };
 pub use runtime::{
     IngestStage, IngestStageConfigError, IngestStageOrder, IngestStageRuntime,
     NoopStageRollbackHook, RuntimeExecutionOutcome, StageCancellation, StageFailure,
     StageInputEnvelope, StageOutputEnvelope, StageResult, StageRollbackHook, StageTransition,
     StageTransitionState,
+};
+pub use telemetry::{
+    FailureClass, PipelineTelemetryReport, StageDuration, StageFailureEvent, StageTimer,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -109,7 +109,12 @@ impl<'a> Pipeline<'a> {
         stage_order: Option<IngestStageOrder>,
     ) -> Result<CanonicalDocument> {
         let cancellation = CancellationSource::new();
-        self.process_file_with_stage_order_and_token(path, bytes, stage_order, &cancellation.token())
+        self.process_file_with_stage_order_and_token(
+            path,
+            bytes,
+            stage_order,
+            &cancellation.token(),
+        )
     }
 
     pub fn process_file_with_stage_order_and_token(
@@ -162,7 +167,11 @@ impl<'a> Pipeline<'a> {
         stage_order: Option<IngestStageOrder>,
     ) -> Result<PipelineStats> {
         let cancellation = CancellationSource::new();
-        let out = self.process_directory_with_stage_order_and_token(root, stage_order, &cancellation.token())?;
+        let out = self.process_directory_with_stage_order_and_token(
+            root,
+            stage_order,
+            &cancellation.token(),
+        )?;
         Ok(out.stats)
     }
 

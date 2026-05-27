@@ -3,11 +3,14 @@
 //! Parses MIDI with `midly`, synthesizes audio with `oxisynth`, and streams
 //! PCM samples to the default output device via `cpal`.
 
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use midly::{Smf, Timing, TrackEventKind, MidiMessage};
+use midly::{MidiMessage, Smf, Timing, TrackEventKind};
 use oxisynth::{MidiEvent, SoundFont, Synth, SynthDescriptor};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// Handle to a background playback thread.
 pub struct InternalHandle {
@@ -45,7 +48,10 @@ pub fn play_bytes(midi_data: &[u8], sf2_data: &[u8]) -> Result<InternalHandle> {
         }
     });
 
-    Ok(InternalHandle { stop_flag, thread: Some(thread) })
+    Ok(InternalHandle {
+        stop_flag,
+        thread: Some(thread),
+    })
 }
 
 // ── MIDI parsing ──────────────────────────────────────────────────────────────
@@ -96,11 +102,7 @@ fn parse_midi(data: &[u8]) -> Result<Vec<TimedEvent>> {
 
 // ── Synthesis + audio output ──────────────────────────────────────────────────
 
-fn render_and_play(
-    events: Vec<TimedEvent>,
-    sf2_data: &[u8],
-    stop: Arc<AtomicBool>,
-) -> Result<()> {
+fn render_and_play(events: Vec<TimedEvent>, sf2_data: &[u8], stop: Arc<AtomicBool>) -> Result<()> {
     const SAMPLE_RATE: u32 = 44_100;
 
     let mut synth = Synth::new(SynthDescriptor {
@@ -110,15 +112,14 @@ fn render_and_play(
     .map_err(|e| anyhow::anyhow!("oxisynth init: {e:?}"))?;
 
     let mut cursor = std::io::Cursor::new(sf2_data);
-    let sf = SoundFont::load(&mut cursor)
-        .map_err(|e| anyhow::anyhow!("SF2 load: {e:?}"))?;
+    let sf = SoundFont::load(&mut cursor).map_err(|e| anyhow::anyhow!("SF2 load: {e:?}"))?;
     synth.add_font(sf, true);
 
     let tail_us: u64 = 2_000_000;
     let total_us = events.last().map(|e| e.time_us).unwrap_or(0) + tail_us;
     let total_samples = (total_us as f64 / 1_000_000.0 * SAMPLE_RATE as f64) as usize;
 
-    let mut pcm_left  = vec![0.0f32; total_samples];
+    let mut pcm_left = vec![0.0f32; total_samples];
     let mut pcm_right = vec![0.0f32; total_samples];
 
     let samples_per_us = SAMPLE_RATE as f64 / 1_000_000.0;
@@ -126,7 +127,9 @@ fn render_and_play(
     let mut last_event_sample: usize = 0;
 
     for ev in &events {
-        if stop.load(Ordering::Relaxed) { break; }
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
 
         let event_sample = (ev.time_us as f64 * samples_per_us) as usize;
         let render_count = event_sample.saturating_sub(last_event_sample);
@@ -134,50 +137,88 @@ fn render_and_play(
         if render_count > 0 {
             let n = render_count.min(total_samples.saturating_sub(sample_pos));
             if n > 0 {
-                synth.write_f32(n, &mut pcm_left, sample_pos, 1, &mut pcm_right, sample_pos, 1);
+                synth.write_f32(
+                    n,
+                    &mut pcm_left,
+                    sample_pos,
+                    1,
+                    &mut pcm_right,
+                    sample_pos,
+                    1,
+                );
                 sample_pos += n;
             }
         }
         last_event_sample = event_sample;
 
         let midi_ev = match ev.msg {
-            MidiMessage::NoteOn  { key, vel } =>
-                MidiEvent::NoteOn  { channel: ev.channel, key: key.as_int(), vel: vel.as_int() },
-            MidiMessage::NoteOff { key, .. } =>
-                MidiEvent::NoteOff { channel: ev.channel, key: key.as_int() },
-            MidiMessage::ProgramChange { program } =>
-                MidiEvent::ProgramChange { channel: ev.channel, program_id: program.as_int() },
-            MidiMessage::Controller { controller, value } =>
-                MidiEvent::ControlChange { channel: ev.channel, ctrl: controller.as_int(), value: value.as_int() },
+            MidiMessage::NoteOn { key, vel } => MidiEvent::NoteOn {
+                channel: ev.channel,
+                key: key.as_int(),
+                vel: vel.as_int(),
+            },
+            MidiMessage::NoteOff { key, .. } => MidiEvent::NoteOff {
+                channel: ev.channel,
+                key: key.as_int(),
+            },
+            MidiMessage::ProgramChange { program } => MidiEvent::ProgramChange {
+                channel: ev.channel,
+                program_id: program.as_int(),
+            },
+            MidiMessage::Controller { controller, value } => MidiEvent::ControlChange {
+                channel: ev.channel,
+                ctrl: controller.as_int(),
+                value: value.as_int(),
+            },
             MidiMessage::PitchBend { bend } => {
                 let v = (bend.as_f32() * 8192.0 + 8192.0).clamp(0.0, 16383.0) as u16;
-                MidiEvent::PitchBend { channel: ev.channel, value: v }
+                MidiEvent::PitchBend {
+                    channel: ev.channel,
+                    value: v,
+                }
             }
-            MidiMessage::Aftertouch { key, vel } =>
-                MidiEvent::PolyphonicKeyPressure { channel: ev.channel, key: key.as_int(), value: vel.as_int() },
-            MidiMessage::ChannelAftertouch { vel } =>
-                MidiEvent::ChannelPressure { channel: ev.channel, value: vel.as_int() },
+            MidiMessage::Aftertouch { key, vel } => MidiEvent::PolyphonicKeyPressure {
+                channel: ev.channel,
+                key: key.as_int(),
+                value: vel.as_int(),
+            },
+            MidiMessage::ChannelAftertouch { vel } => MidiEvent::ChannelPressure {
+                channel: ev.channel,
+                value: vel.as_int(),
+            },
         };
         let _ = synth.send_event(midi_ev);
     }
 
     let remaining = total_samples.saturating_sub(sample_pos);
     if remaining > 0 && !stop.load(Ordering::Relaxed) {
-        synth.write_f32(remaining, &mut pcm_left, sample_pos, 1, &mut pcm_right, sample_pos, 1);
+        synth.write_f32(
+            remaining,
+            &mut pcm_left,
+            sample_pos,
+            1,
+            &mut pcm_right,
+            sample_pos,
+            1,
+        );
     }
 
     stream_pcm(pcm_left, pcm_right, stop)
 }
 
 fn stream_pcm(left: Vec<f32>, right: Vec<f32>, stop: Arc<AtomicBool>) -> Result<()> {
-    let host   = cpal::default_host();
-    let device = host.default_output_device().context("no audio output device")?;
-    let config = device.default_output_config().context("no default output config")?;
+    let host = cpal::default_host();
+    let device = host
+        .default_output_device()
+        .context("no audio output device")?;
+    let config = device
+        .default_output_config()
+        .context("no default output config")?;
 
     let channels = config.channels() as usize;
-    let buf   = Arc::new(std::sync::Mutex::new((left, right, 0usize)));
-    let buf2  = Arc::clone(&buf);
-    let done  = Arc::new(AtomicBool::new(false));
+    let buf = Arc::new(std::sync::Mutex::new((left, right, 0usize)));
+    let buf2 = Arc::clone(&buf);
+    let done = Arc::new(AtomicBool::new(false));
     let done2 = Arc::clone(&done);
 
     let stream = device.build_output_stream(
@@ -206,13 +247,19 @@ fn fill_output(
 
     for i in 0..frames {
         if *pos >= left.len() {
-            for s in &mut output[i * channels..] { *s = 0.0; }
+            for s in &mut output[i * channels..] {
+                *s = 0.0;
+            }
             done.store(true, Ordering::Relaxed);
             return;
         }
         output[i * channels] = left[*pos];
-        if channels > 1 { output[i * channels + 1] = right[*pos]; }
-        for c in 2..channels { output[i * channels + c] = 0.0; }
+        if channels > 1 {
+            output[i * channels + 1] = right[*pos];
+        }
+        for c in 2..channels {
+            output[i * channels + c] = 0.0;
+        }
         *pos += 1;
     }
 }

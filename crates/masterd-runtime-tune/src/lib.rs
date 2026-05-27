@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 
 // ── Compile-time embedded assets ────────────────────────────────────────────
 
-static PROFILE_AMD_BALANCED:        &str = include_str!("../assets/amd-balanced.toml");
+static PROFILE_AMD_BALANCED: &str = include_str!("../assets/amd-balanced.toml");
 static PROFILE_AMD_ROCM_AGGRESSIVE: &str = include_str!("../assets/amd-rocm-aggressive.toml");
-static PROFILE_SAFE_DIRECT:         &str = include_str!("../assets/safe-direct.toml");
-static KERNEL_MANIFEST_BYTES:       &str = include_str!("../assets/kernel_manifest.toml");
+static PROFILE_SAFE_DIRECT: &str = include_str!("../assets/safe-direct.toml");
+static KERNEL_MANIFEST_BYTES: &str = include_str!("../assets/kernel_manifest.toml");
 
 /// Load the kernel manifest from embedded bytes — no file path needed.
 pub fn load_kernel_manifest_embedded() -> Result<KernelManifest> {
@@ -23,9 +23,9 @@ pub fn load_kernel_manifest_embedded() -> Result<KernelManifest> {
 /// Load all bundled AMD/safe profiles from embedded bytes — no directory scan needed.
 pub fn load_profiles_embedded() -> Result<Vec<RuntimeProfile>> {
     let sources = [
-        ("amd-balanced",         PROFILE_AMD_BALANCED),
-        ("amd-rocm-aggressive",  PROFILE_AMD_ROCM_AGGRESSIVE),
-        ("safe-direct",          PROFILE_SAFE_DIRECT),
+        ("amd-balanced", PROFILE_AMD_BALANCED),
+        ("amd-rocm-aggressive", PROFILE_AMD_ROCM_AGGRESSIVE),
+        ("safe-direct", PROFILE_SAFE_DIRECT),
     ];
     let mut profiles = Vec::new();
     for (name, raw) in &sources {

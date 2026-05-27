@@ -125,7 +125,10 @@ impl DocumentDeduper {
     fn extract_domain(url_str: &str) -> String {
         Url::parse(url_str)
             .ok()
-            .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_lowercase()))
+            .and_then(|u| {
+                u.host_str()
+                    .map(|h| h.trim_start_matches("www.").to_lowercase())
+            })
             .unwrap_or_default()
     }
 
@@ -142,7 +145,10 @@ impl DocumentDeduper {
         // 2. Domain + title duplicate
         let domain = Self::extract_domain(url);
         if !domain.is_empty() && !normalized_title.is_empty() {
-            if !self.seen_domain_titles.insert((domain, normalized_title.clone())) {
+            if !self
+                .seen_domain_titles
+                .insert((domain, normalized_title.clone()))
+            {
                 return true;
             }
         }
@@ -193,9 +199,17 @@ mod tests {
     #[test]
     fn deduplicates_by_title() {
         let mut d = DocumentDeduper::new();
-        assert!(!d.is_duplicate("https://a.com/1", "My Great Article About Rust Programming", "s1"));
+        assert!(!d.is_duplicate(
+            "https://a.com/1",
+            "My Great Article About Rust Programming",
+            "s1"
+        ));
         // Same title, different URL → duplicate
-        assert!(d.is_duplicate("https://b.com/2", "My Great Article About Rust Programming - GitHub", "s2"));
+        assert!(d.is_duplicate(
+            "https://b.com/2",
+            "My Great Article About Rust Programming - GitHub",
+            "s2"
+        ));
     }
 
     #[test]

@@ -1,12 +1,12 @@
-mod session;
-mod rag;
-mod web_search;
 pub mod ollama;
+mod rag;
+mod session;
+mod web_search;
 
-pub use session::{ChatSession, ChatMessage, Role};
+pub use ollama::{OLLAMA_DEFAULT_MODEL, OLLAMA_DEFAULT_URL, OllamaBackend};
 pub use rag::{RagContextBuilder, WebResult};
+pub use session::{ChatMessage, ChatSession, Role};
 pub use web_search::WebSearchBackend;
-pub use ollama::{OllamaBackend, OLLAMA_DEFAULT_URL, OLLAMA_DEFAULT_MODEL};
 
 use anyhow::{Context, Result};
 use candle_core::{Device, quantized::gguf_file};
@@ -16,35 +16,29 @@ use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info};
 
 pub use masterd_index::{
-    IndexedDocument, IndexSnapshot, LocalIndex, SearchResult,
-    DocumentDeduper, BM25Okapi,
+    BM25Okapi, DocumentDeduper, IndexSnapshot, IndexedDocument, LocalIndex, SearchResult,
 };
 
 // ── Compile-time embedded assets ────────────────────────────────────────────
 
 /// LFM2.5-1.2B-Thinking GGUF — embedded at compile time (~1.3 GB in binary).
-static THINKING_GGUF: &[u8] =
-    include_bytes!("../assets/models/thinking/model.gguf");
+static THINKING_GGUF: &[u8] = include_bytes!("../assets/models/thinking/model.gguf");
 
 /// LFM2.5-350M-Instruct GGUF — embedded at compile time (~375 MB in binary).
-static INSTRUCT_GGUF: &[u8] =
-    include_bytes!("../assets/models/instruct/model.gguf");
+static INSTRUCT_GGUF: &[u8] = include_bytes!("../assets/models/instruct/model.gguf");
 
 /// Tokenizer for the Thinking model.
-static THINKING_TOKENIZER: &[u8] =
-    include_bytes!("../assets/models/thinking/tokenizer.json");
+static THINKING_TOKENIZER: &[u8] = include_bytes!("../assets/models/thinking/tokenizer.json");
 
 /// Tokenizer for the Instruct model.
-static INSTRUCT_TOKENIZER: &[u8] =
-    include_bytes!("../assets/models/instruct/tokenizer.json");
+static INSTRUCT_TOKENIZER: &[u8] = include_bytes!("../assets/models/instruct/tokenizer.json");
 
 /// MASTERd persona prompt — injected as system context on every call.
-static MASTERD_PERSONA: &str =
-    include_str!("../assets/prompts/masterd_personality.txt");
+static MASTERD_PERSONA: &str = include_str!("../assets/prompts/masterd_personality.txt");
 
 // ── User-facing mode enums ──────────────────────────────────────────────────
 
@@ -85,7 +79,10 @@ pub enum ChatToken {
     /// Normal response token.
     Response(String),
     /// Generation complete.
-    Done { model: String, citations: Vec<WebResult> },
+    Done {
+        model: String,
+        citations: Vec<WebResult>,
+    },
 }
 
 // ── Loaded model handle ─────────────────────────────────────────────────────
@@ -104,7 +101,10 @@ impl LoadedModel {
         tokenizer_bytes: &'static [u8],
         label: &'static str,
     ) -> Result<Self> {
-        info!("loading embedded model '{label}' ({:.0} MB)", gguf_bytes.len() as f64 / 1_048_576.0);
+        info!(
+            "loading embedded model '{label}' ({:.0} MB)",
+            gguf_bytes.len() as f64 / 1_048_576.0
+        );
         let device = Device::Cpu;
 
         // GGUF reader requires Read + Seek — Cursor provides both over &[u8].
@@ -121,7 +121,12 @@ impl LoadedModel {
         let eos_token_id = Self::guess_eos(&tokenizer);
         info!("'{label}' ready — eos_token_id={eos_token_id}");
 
-        Ok(Self { weights, tokenizer, eos_token_id, device })
+        Ok(Self {
+            weights,
+            tokenizer,
+            eos_token_id,
+            device,
+        })
     }
 
     fn guess_eos(tok: &Tokenizer) -> u32 {
@@ -200,8 +205,12 @@ impl ChatEngine {
     /// Which models are currently loaded.
     pub fn loaded_models(&self) -> Vec<&'static str> {
         let mut v = vec![];
-        if self.thinking.lock().unwrap().is_some() { v.push("lfm2.5-thinking-1.2b"); }
-        if self.instruct.lock().unwrap().is_some()  { v.push("lfm2.5-instruct-350m"); }
+        if self.thinking.lock().unwrap().is_some() {
+            v.push("lfm2.5-thinking-1.2b");
+        }
+        if self.instruct.lock().unwrap().is_some() {
+            v.push("lfm2.5-instruct-350m");
+        }
         v
     }
 
@@ -242,7 +251,9 @@ impl ChatEngine {
         let mut g = self.thinking.lock().unwrap();
         if g.is_none() {
             *g = Some(LoadedModel::from_embedded(
-                THINKING_GGUF, THINKING_TOKENIZER, "lfm2.5-thinking",
+                THINKING_GGUF,
+                THINKING_TOKENIZER,
+                "lfm2.5-thinking",
             )?);
         }
         Ok(())
@@ -252,7 +263,9 @@ impl ChatEngine {
         let mut g = self.instruct.lock().unwrap();
         if g.is_none() {
             *g = Some(LoadedModel::from_embedded(
-                INSTRUCT_GGUF, INSTRUCT_TOKENIZER, "lfm2.5-instruct",
+                INSTRUCT_GGUF,
+                INSTRUCT_TOKENIZER,
+                "lfm2.5-instruct",
             )?);
         }
         Ok(())
@@ -261,11 +274,20 @@ impl ChatEngine {
     fn pick_model(&self, mode: ThinkMode, query: &str) -> ThinkMode {
         match mode {
             ThinkMode::Auto => {
-                let complex = ["explain", "analyze", "compare", "why", "how does",
-                               "summarize", "describe", "difference", "step by step", "reason"];
+                let complex = [
+                    "explain",
+                    "analyze",
+                    "compare",
+                    "why",
+                    "how does",
+                    "summarize",
+                    "describe",
+                    "difference",
+                    "step by step",
+                    "reason",
+                ];
                 let q = query.to_lowercase();
-                if query.split_whitespace().count() > 12
-                    || complex.iter().any(|kw| q.contains(kw))
+                if query.split_whitespace().count() > 12 || complex.iter().any(|kw| q.contains(kw))
                 {
                     ThinkMode::Thinking
                 } else {
@@ -292,8 +314,7 @@ impl ChatEngine {
     ) -> Result<()> {
         let resolved = self.pick_model(think_mode, &query);
 
-        let (context_block, citations) =
-            self.rag.build(&query, search_mode, &self.web).await?;
+        let (context_block, citations) = self.rag.build(&query, search_mode, &self.web).await?;
 
         // Persona is baked in — always injected, never configurable at runtime.
         let system_prompt = format!("{}\n\n{}", MASTERD_PERSONA, context_block);
@@ -315,12 +336,26 @@ impl ChatEngine {
             ThinkMode::Thinking => {
                 engine.ensure_thinking()?;
                 let mut g = engine.thinking.lock().unwrap();
-                generate(g.as_mut().unwrap(), &prompt, &cfg, ThinkMode::Thinking, tx2, citations)
+                generate(
+                    g.as_mut().unwrap(),
+                    &prompt,
+                    &cfg,
+                    ThinkMode::Thinking,
+                    tx2,
+                    citations,
+                )
             }
             _ => {
                 engine.ensure_instruct()?;
                 let mut g = engine.instruct.lock().unwrap();
-                generate(g.as_mut().unwrap(), &prompt, &cfg, ThinkMode::Instruct, tx2, citations)
+                generate(
+                    g.as_mut().unwrap(),
+                    &prompt,
+                    &cfg,
+                    ThinkMode::Instruct,
+                    tx2,
+                    citations,
+                )
             }
         })
         .await
@@ -350,13 +385,15 @@ impl ChatEngine {
             );
         }
 
-        ollama.chat_stream(
-            &system_prompt_fb,
-            &query_fb,
-            self.config.max_new_tokens,
-            citations_fb,
-            tx,
-        ).await
+        ollama
+            .chat_stream(
+                &system_prompt_fb,
+                &query_fb,
+                self.config.max_new_tokens,
+                citations_fb,
+                tx,
+            )
+            .await
     }
 }
 
@@ -380,7 +417,10 @@ fn generate(
     let input = candle_core::Tensor::new(ids.as_slice(), &model.device)?.unsqueeze(0)?;
     let mut logits_proc = LogitsProcessor::from_sampling(
         42,
-        Sampling::TopK { k: config.top_k, temperature: config.temperature },
+        Sampling::TopK {
+            k: config.top_k,
+            temperature: config.temperature,
+        },
     );
 
     let mut all_tokens = ids.clone();
@@ -390,7 +430,12 @@ fn generate(
     // Process full prompt in one forward pass.
     let logits = model.weights.forward(&input, 0)?;
     let logits = logits.squeeze(0)?.squeeze(0)?;
-    let logits = repeat_penalty(&logits, &all_tokens, config.repeat_penalty, config.repeat_last_n)?;
+    let logits = repeat_penalty(
+        &logits,
+        &all_tokens,
+        config.repeat_penalty,
+        config.repeat_last_n,
+    )?;
     let mut next = logits_proc.sample(&logits)?;
     all_tokens.push(next);
 
@@ -398,11 +443,15 @@ fn generate(
         if next == model.eos_token_id {
             break;
         }
-        let step_input =
-            candle_core::Tensor::new(&[next], &model.device)?.unsqueeze(0)?;
+        let step_input = candle_core::Tensor::new(&[next], &model.device)?.unsqueeze(0)?;
         let logits = model.weights.forward(&step_input, all_tokens.len() - 1)?;
         let logits = logits.squeeze(0)?.squeeze(0)?;
-        let logits = repeat_penalty(&logits, &all_tokens, config.repeat_penalty, config.repeat_last_n)?;
+        let logits = repeat_penalty(
+            &logits,
+            &all_tokens,
+            config.repeat_penalty,
+            config.repeat_last_n,
+        )?;
         next = logits_proc.sample(&logits)?;
         all_tokens.push(next);
 
@@ -429,9 +478,12 @@ fn generate(
 
     let badge = match mode {
         ThinkMode::Thinking => "THINKING 1.2B",
-        _                   => "INSTRUCT 350M",
+        _ => "INSTRUCT 350M",
     };
-    let _ = tx.blocking_send(ChatToken::Done { model: badge.to_string(), citations });
+    let _ = tx.blocking_send(ChatToken::Done {
+        model: badge.to_string(),
+        citations,
+    });
     Ok(())
 }
 
@@ -445,12 +497,20 @@ fn repeat_penalty(
     penalty: f32,
     last_n: usize,
 ) -> Result<candle_core::Tensor> {
-    let window = if tokens.len() > last_n { &tokens[tokens.len() - last_n..] } else { tokens };
+    let window = if tokens.len() > last_n {
+        &tokens[tokens.len() - last_n..]
+    } else {
+        tokens
+    };
     let mut v: Vec<f32> = logits.to_vec1()?;
     for &t in window {
         let i = t as usize;
         if i < v.len() {
-            if v[i] >= 0.0 { v[i] /= penalty; } else { v[i] *= penalty; }
+            if v[i] >= 0.0 {
+                v[i] /= penalty;
+            } else {
+                v[i] *= penalty;
+            }
         }
     }
     Ok(candle_core::Tensor::new(v.as_slice(), logits.device())?)
@@ -470,8 +530,14 @@ mod tests {
 
     #[test]
     fn tokenizer_bytes_are_embedded() {
-        assert!(THINKING_TOKENIZER.len() > 1000, "thinking tokenizer suspiciously small");
-        assert!(INSTRUCT_TOKENIZER.len() > 1000, "instruct tokenizer suspiciously small");
+        assert!(
+            THINKING_TOKENIZER.len() > 1000,
+            "thinking tokenizer suspiciously small"
+        );
+        assert!(
+            INSTRUCT_TOKENIZER.len() > 1000,
+            "instruct tokenizer suspiciously small"
+        );
     }
 
     #[test]
@@ -490,7 +556,10 @@ mod tests {
     #[test]
     fn think_mode_auto_routes_complex_query_to_thinking() {
         let engine = ChatEngine::new(ChatEngineConfig::default());
-        let resolved = engine.pick_model(ThinkMode::Auto, "explain how rotary embeddings work step by step");
+        let resolved = engine.pick_model(
+            ThinkMode::Auto,
+            "explain how rotary embeddings work step by step",
+        );
         assert_eq!(resolved, ThinkMode::Thinking);
     }
 

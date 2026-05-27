@@ -67,7 +67,10 @@ impl LocalIndex {
         self.remove(&doc.doc_id);
 
         for token in BM25Okapi::tokenize(&doc.text) {
-            self.lexical.entry(token).or_default().insert(doc.doc_id.clone());
+            self.lexical
+                .entry(token)
+                .or_default()
+                .insert(doc.doc_id.clone());
         }
 
         if let Some(path) = &doc.path {
@@ -75,7 +78,10 @@ impl LocalIndex {
         }
 
         for sym in &doc.symbols {
-            self.symbols.entry(sym.clone()).or_default().insert(doc.doc_id.clone());
+            self.symbols
+                .entry(sym.clone())
+                .or_default()
+                .insert(doc.doc_id.clone());
         }
 
         self.documents.push(doc);
@@ -125,7 +131,10 @@ impl LocalIndex {
 
     /// Lookup docs that define a symbol.
     pub fn lookup_symbol(&self, symbol: &str) -> Vec<String> {
-        self.symbols.get(symbol).map(|s| s.iter().cloned().collect()).unwrap_or_default()
+        self.symbols
+            .get(symbol)
+            .map(|s| s.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Lookup doc_id by path.

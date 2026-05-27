@@ -115,8 +115,9 @@ impl AtomicHashIndexService {
 
     fn acquire_lock(&self) -> Result<HashIndexLockGuard> {
         if let Some(parent) = self.lock_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed creating hash-index lock dir {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed creating hash-index lock dir {}", parent.display())
+            })?;
         }
         let start = SystemTime::now();
         loop {
@@ -207,11 +208,15 @@ impl AtomicHashIndexService {
                 .write(true)
                 .create_new(true)
                 .open(&tmp_path)
-                .with_context(|| format!("failed opening temp hash-index {}", tmp_path.display()))?;
-            file.write_all(&payload)
-                .with_context(|| format!("failed writing temp hash-index {}", tmp_path.display()))?;
-            file.sync_all()
-                .with_context(|| format!("failed syncing temp hash-index {}", tmp_path.display()))?;
+                .with_context(|| {
+                    format!("failed opening temp hash-index {}", tmp_path.display())
+                })?;
+            file.write_all(&payload).with_context(|| {
+                format!("failed writing temp hash-index {}", tmp_path.display())
+            })?;
+            file.sync_all().with_context(|| {
+                format!("failed syncing temp hash-index {}", tmp_path.display())
+            })?;
         }
         fs::rename(&tmp_path, &self.index_path).with_context(|| {
             format!(
@@ -348,8 +353,12 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| PathBuf::from("data/ingest_hash_index.json"));
     let hash_index = AtomicHashIndexService::new(hash_index_path);
 
-    let stats =
-        process_directory_with_hash_index(&pipeline, &args.root, configured_stage_order, &hash_index)?;
+    let stats = process_directory_with_hash_index(
+        &pipeline,
+        &args.root,
+        configured_stage_order,
+        &hash_index,
+    )?;
     println!(
         "MASTERd ingest done: discovered={}, ingested={}, skipped={}",
         stats.discovered, stats.ingested, stats.skipped

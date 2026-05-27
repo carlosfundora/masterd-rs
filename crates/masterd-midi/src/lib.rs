@@ -24,8 +24,8 @@
 pub mod detect;
 pub mod fallback;
 
-use std::path::Path;
 use anyhow::Result;
+use std::path::Path;
 
 pub use detect::SystemPlayer;
 
@@ -58,7 +58,9 @@ impl PlaybackHandle {
     /// Stop playback immediately.
     pub fn stop(self) {
         match self {
-            Self::Process(mut child) => { let _ = child.kill(); }
+            Self::Process(mut child) => {
+                let _ = child.kill();
+            }
             Self::Internal(h) => h.stop(),
         }
     }
@@ -78,7 +80,9 @@ impl MidiPlayer {
             tracing::info!("MIDI: using system player {:?}", player);
             match player.spawn(path) {
                 Ok(child) => return Ok(PlaybackHandle::Process(child)),
-                Err(e) => tracing::warn!("MIDI: system player failed ({e}), falling back to built-in"),
+                Err(e) => {
+                    tracing::warn!("MIDI: system player failed ({e}), falling back to built-in")
+                }
             }
         }
 

@@ -123,10 +123,7 @@ impl RetrievalResult {
 pub trait RetrievalStage: Send + Sync {
     fn name(&self) -> &str;
 
-    fn retrieve(
-        &self,
-        plan: &QueryPlan,
-    ) -> Result<Vec<RetrievalCandidate>, RetrievalError>;
+    fn retrieve(&self, plan: &QueryPlan) -> Result<Vec<RetrievalCandidate>, RetrievalError>;
 }
 
 /// A reranker hook applied after candidates are merged.
@@ -202,7 +199,9 @@ impl RetrievalPipeline {
 fn dedup_by_score(candidates: Vec<RetrievalCandidate>) -> Vec<RetrievalCandidate> {
     let mut best: HashMap<String, RetrievalCandidate> = HashMap::new();
     for candidate in candidates {
-        let entry = best.entry(candidate.doc_id.clone()).or_insert_with(|| candidate.clone());
+        let entry = best
+            .entry(candidate.doc_id.clone())
+            .or_insert_with(|| candidate.clone());
         if candidate.score > entry.score {
             *entry = candidate;
         }
@@ -329,7 +328,10 @@ mod tests {
     fn query_plan_parses_terms_and_filters() {
         let plan = QueryPlan::parse("hello world tag:important top:5 mode:semantic", 10);
         assert_eq!(plan.terms, vec!["hello", "world"]);
-        assert_eq!(plan.filters.get("tag").map(|s| s.as_str()), Some("important"));
+        assert_eq!(
+            plan.filters.get("tag").map(|s| s.as_str()),
+            Some("important")
+        );
         assert_eq!(plan.top_k, 5);
         assert_eq!(plan.intent, QueryIntent::Semantic);
     }
@@ -338,7 +340,10 @@ mod tests {
     fn pipeline_deduplicates_and_keeps_highest_score() {
         let stage_a = FixedStage {
             name: "lexical".to_string(),
-            results: vec![candidate("doc1", 0.8, "lexical"), candidate("doc2", 0.6, "lexical")],
+            results: vec![
+                candidate("doc1", 0.8, "lexical"),
+                candidate("doc2", 0.6, "lexical"),
+            ],
         };
         let stage_b = FixedStage {
             name: "semantic".to_string(),
@@ -371,7 +376,10 @@ mod tests {
                 .map(|i| candidate(&format!("doc{i}"), i as f32 / 20.0, "test"))
                 .collect(),
         };
-        let pipeline = RetrievalPipeline::builder().add_stage(stage).build().unwrap();
+        let pipeline = RetrievalPipeline::builder()
+            .add_stage(stage)
+            .build()
+            .unwrap();
         let plan = QueryPlan::parse("test", 5);
         let result = pipeline.execute(&plan).unwrap();
         assert!(result.candidates.len() <= 5);
