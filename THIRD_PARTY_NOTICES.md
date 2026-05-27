@@ -19,8 +19,6 @@ metadata inside each vendored project remain authoritative for that project.
   `jina-embeddings-v5-omni-small` and the local `jina-code-embed` endpoint name
   used by the embedding configuration. Model usage remains governed by Jina AI's
   upstream model licenses and terms.
-- Qwen3 embeddings: credited for the Qwen3 embedding endpoint/model integration.
-  Model usage remains governed by the upstream Qwen model licenses and terms.
 - ColBERT / MaxSim reranking: credited for the late-interaction retrieval and
   MaxSim reranking approach used by the indexing pipeline.
 

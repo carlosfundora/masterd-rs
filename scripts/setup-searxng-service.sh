@@ -17,17 +17,18 @@ masterd_ensure_uv "${ROOT_DIR}"
 mkdir -p "${SERVICE_DIR}"
 
 if [[ ! -d "${SRC_DIR}/.git" ]]; then
-  rm -rf "${SRC_DIR}"
+  /bin/rm -rf "${SRC_DIR}"
   git clone --depth 1 --branch "${SEARXNG_REF}" https://github.com/searxng/searxng.git "${SRC_DIR}"
 else
   git -C "${SRC_DIR}" fetch --depth 1 origin "${SEARXNG_REF}"
   git -C "${SRC_DIR}" checkout FETCH_HEAD
 fi
 
-rm -rf "${VENV_DIR}"
+/bin/rm -rf "${VENV_DIR}"
 "${MASTERD_UV_BIN}" venv --seed --relocatable --python "${MASTERD_PYTHON_BIN}" "${VENV_DIR}"
-"${MASTERD_UV_BIN}" pip install --python "${VENV_DIR}/bin/python" -e "${SRC_DIR}"
-"${MASTERD_UV_BIN}" pip install --python "${VENV_DIR}/bin/python" pyyaml
+UV_NO_CONFIG=1 "${MASTERD_UV_BIN}" pip install --python "${VENV_DIR}/bin/python" -r "${SRC_DIR}/requirements.txt" setuptools wheel
+UV_NO_CONFIG=1 "${MASTERD_UV_BIN}" pip install --python "${VENV_DIR}/bin/python" --no-build-isolation -e "${SRC_DIR}"
+UV_NO_CONFIG=1 "${MASTERD_UV_BIN}" pip install --python "${VENV_DIR}/bin/python" pyyaml
 
 [[ -f "${SETTINGS_FILE}" ]] || {
   printf "[setup-searxng] ERROR: missing settings template at %s\n" "${SETTINGS_FILE}" >&2
