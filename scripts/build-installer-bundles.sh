@@ -10,10 +10,10 @@ source "${ROOT_DIR}/scripts/lib/install-bootstrap.sh"
 MASTERD_BUILD_JOBS="${MASTERD_BUILD_JOBS:-8}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-${MASTERD_BUILD_JOBS}}"
 
-# ── AMD ROCm enforcement ───────────────────────────────────────────────────
-# All Python package resolution in this build must use the AMD ROCm PyTorch
-# index. These env vars are inherited by every subprocess (uv, pip, cargo
-# build scripts that shell out to Python, CMake builds, etc.).
+# ── AMD ROCm defaults ──────────────────────────────────────────────────────
+# Python package resolution is scoped inside setup-embedding-services.sh.
+# Do not export pip/uv index URLs globally from this installer: non-package
+# uv commands and unrelated subprocesses can interpret them as request URLs.
 #
 # Nightly ROCm 6.3 carries torch+rocm7.2 wheels. Stable ROCm 6.2.4 is the
 # fallback. NVIDIA/CUDA wheels are blocked via the constraints file.
@@ -22,18 +22,11 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-${MASTERD_BUILD_JOBS}}"
 export ROCM_HOME="${ROCM_HOME:-/opt/rocm}"
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
 
-# Force one valid ROCm PyTorch index URL for uv and pip. Some uv versions
-# reject a whitespace-separated URL list in UV_EXTRA_INDEX_URL as one malformed
-# URL, so fallback indexes must be passed explicitly at call sites.
 ROCM_TORCH_INDEX_NIGHTLY="${ROCM_TORCH_INDEX_NIGHTLY:-https://download.pytorch.org/whl/nightly/rocm6.3}"
 ROCM_TORCH_INDEX_STABLE="${ROCM_TORCH_INDEX_STABLE:-https://download.pytorch.org/whl/rocm6.2.4}"
-export UV_EXTRA_INDEX_URL="${ROCM_TORCH_INDEX_NIGHTLY}"
-export PIP_EXTRA_INDEX_URL="${ROCM_TORCH_INDEX_NIGHTLY}"
 
 # Block CUDA wheels globally via the project constraints file.
 ROCM_CONSTRAINTS="${ROOT_DIR}/config/rocm-constraints.txt"
-export PIP_CONSTRAINT="${ROCM_CONSTRAINTS}"
-export UV_CONSTRAINT="${ROCM_CONSTRAINTS}"
 
 # Disable any stray CUDA device selection; only HIP/ROCm should be active.
 export CUDA_VISIBLE_DEVICES=""

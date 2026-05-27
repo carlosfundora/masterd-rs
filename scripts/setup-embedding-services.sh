@@ -30,15 +30,12 @@ SERVICES_DIR="${ROOT_DIR}/services"
 
 source "${ROOT_DIR}/scripts/lib/install-bootstrap.sh"
 
-# ── AMD ROCm index (must be set before any uv/pip call) ──────────────────
+# ── AMD ROCm index ────────────────────────────────────────────────────────
+# Keep these as local script variables. Passing them directly to pip/uv package
+# installs avoids leaking package-index URLs into uv python/bootstrap commands.
 ROCM_TORCH_INDEX="${ROCM_TORCH_INDEX:-https://download.pytorch.org/whl/nightly/rocm6.3}"
 ROCM_STABLE_INDEX="${ROCM_STABLE_INDEX:-https://download.pytorch.org/whl/rocm6.2.4}"
 ROCM_CONSTRAINTS="${ROOT_DIR}/config/rocm-constraints.txt"
-
-export UV_EXTRA_INDEX_URL="${ROCM_TORCH_INDEX}"
-export PIP_EXTRA_INDEX_URL="${ROCM_TORCH_INDEX}"
-export PIP_CONSTRAINT="${ROCM_CONSTRAINTS}"
-export UV_CONSTRAINT="${ROCM_CONSTRAINTS}"
 
 # Block CUDA; ROCm only.
 export CUDA_VISIBLE_DEVICES=""
