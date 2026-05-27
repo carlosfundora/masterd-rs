@@ -107,6 +107,7 @@ impl LoadedModel {
     fn from_embedded(
         gguf_bytes: &'static [u8],
         tokenizer_bytes: &'static [u8],
+        chat_template: &'static str,
         label: &'static str,
     ) -> Result<Self> {
         info!(
@@ -125,6 +126,14 @@ impl LoadedModel {
         // Tokenizer from raw JSON bytes — no file path needed.
         let tokenizer = Tokenizer::from_bytes(tokenizer_bytes)
             .map_err(|e| anyhow::anyhow!("load tokenizer for {label}: {e}"))?;
+        anyhow::ensure!(
+            chat_template.contains("<|im_start|>assistant"),
+            "chat template for {label} is missing the assistant generation prompt"
+        );
+        debug!(
+            "loaded embedded chat template for {label} ({} bytes)",
+            chat_template.len()
+        );
 
         let eos_token_id = Self::guess_eos(&tokenizer);
         info!("'{label}' ready — eos_token_id={eos_token_id}");
@@ -261,6 +270,7 @@ impl ChatEngine {
             *g = Some(LoadedModel::from_embedded(
                 THINKING_GGUF,
                 THINKING_TOKENIZER,
+                THINKING_CHAT_TEMPLATE,
                 "lfm2.5-thinking",
             )?);
         }
@@ -273,6 +283,7 @@ impl ChatEngine {
             *g = Some(LoadedModel::from_embedded(
                 INSTRUCT_GGUF,
                 INSTRUCT_TOKENIZER,
+                INSTRUCT_CHAT_TEMPLATE,
                 "lfm2.5-instruct",
             )?);
         }
