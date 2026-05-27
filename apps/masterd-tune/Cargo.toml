@@ -1,0 +1,11 @@
+[package]
+name = "masterd-tune"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+masterd-runtime-tune = { path = "../../crates/masterd-runtime-tune" }

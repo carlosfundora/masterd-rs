@@ -1,0 +1,11 @@
+name = "safe-direct"
+backend = "direct"
+required = ["cpu"]
+
+[args]
+radix = false
+flash_attention = false
+turboquant = false
+rotorquant = false
+triton = false
+aiter = false

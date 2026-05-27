@@ -1,0 +1,14 @@
+[package]
+name = "masterd-engine-check"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+masterd-embed-engine = { path = "../../crates/masterd-embed-engine" }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true

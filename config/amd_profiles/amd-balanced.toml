@@ -1,0 +1,11 @@
+name = "amd-balanced"
+backend = "direct"
+required = ["cpu", "gpu_amd"]
+
+[args]
+radix = true
+flash_attention = true
+turboquant = false
+rotorquant = false
+triton = true
+aiter = false

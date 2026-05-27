@@ -1,0 +1,11 @@
+name = "amd-rocm-aggressive"
+backend = "http"
+required = ["cpu", "gpu_amd", "rocm"]
+
+[args]
+radix = true
+flash_attention = true
+turboquant = true
+rotorquant = true
+triton = true
+aiter = true

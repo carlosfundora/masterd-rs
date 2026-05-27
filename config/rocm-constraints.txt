@@ -1,0 +1,39 @@
+# MASTERd — ROCm hard constraints
+#
+# This file is passed to uv/pip via the PIP_CONSTRAINT environment variable.
+# It prevents any CUDA or NVIDIA wheel from being resolved even if a transitive
+# dependency requests one. All neural inference runs on AMD ROCm.
+#
+# Usage (set in shell or script):
+#   export PIP_CONSTRAINT=/path/to/rocm-constraints.txt
+#   export UV_CONSTRAINT=/path/to/rocm-constraints.txt
+#
+# These pin conflicting NVIDIA packages to an impossible version so the
+# resolver fails loudly rather than silently pulling CUDA builds.
+
+# ── Block CUDA runtime wheels ────────────────────────────────────────────────
+nvidia-cuda-runtime-cu12==0
+nvidia-cuda-runtime-cu11==0
+nvidia-cublas-cu12==0
+nvidia-cublas-cu11==0
+nvidia-cudnn-cu12==0
+nvidia-cudnn-cu11==0
+nvidia-cufft-cu12==0
+nvidia-cusolver-cu12==0
+nvidia-cusparse-cu12==0
+nvidia-nccl-cu12==0
+nvidia-nvtx-cu12==0
+nvidia-cuda-nvrtc-cu12==0
+nvidia-cuda-cupti-cu12==0
+nvidia-pyindex==0
+
+# ── Block CUDA-linked torch wheels ──────────────────────────────────────────
+# Torch packages with +cu* local version identifiers cannot be expressed in
+# constraints, but pinning the CPU/generic ones to 0 causes the resolver to
+# reject them if they would otherwise be selected over the +rocm wheel.
+# The torch+rocm wheel is installed explicitly via the ROCm index below.
+
+# ── Do NOT block ────────────────────────────────────────────────────────────
+# torch, torchvision, torchaudio -- installed explicitly via ROCm index
+# These are NOT listed here; blocking them here would prevent ROCm installs.
+# Always install via: uv pip install torch --index https://download.pytorch.org/whl/rocm6.2.4

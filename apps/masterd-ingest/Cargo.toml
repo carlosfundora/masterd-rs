@@ -1,0 +1,17 @@
+[package]
+name = "masterd-ingest"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+masterd-core = { path = "../../crates/masterd-core" }
+masterd-embed-engine = { path = "../../crates/masterd-embed-engine" }
+masterd-pipeline = { path = "../../crates/masterd-pipeline" }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+walkdir.workspace = true

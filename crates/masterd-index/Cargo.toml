@@ -1,0 +1,24 @@
+[package]
+name = "masterd-index"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "BM25 lexical index, ColBERT MaxSim reranker, and document deduplicator for MASTERd"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+sha2.workspace = true
+
+rayon = "1.10"
+regex = "1.10"
+url = "2.5"
+dashmap = "6"
+
+[features]
+default = []
+semantic = []

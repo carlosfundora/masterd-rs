@@ -1,0 +1,34 @@
+[database]
+engine = "rust_native_sqlite"
+path = "data/masterd.db"
+
+[search]
+vector_authority = "lancedb_primary_falkor_graph_mirror"
+colbert_model = "lfm2.5-colbert-250m"
+colbert_device = "cpu"
+lexical_engine = "meilisearch"
+
+[cache]
+hot_cache = "valkey"
+dedup_mode = "rigorous"
+
+[frontend]
+target = "tauri_only"
+
+[embeddings]
+jina_model = "jina-embeddings-v5-omni-small"
+jina_runtime = "local_only"
+multimodal_optional = true
+
+[runtime]
+# Optional; if omitted default deterministic order is used.
+stage_order = [
+  "hot_cache",
+  "dedup",
+  "canonical_write",
+  "snapshot",
+  "colbert_rerank",
+  "lexical_analyze",
+  "multimodal_embed",
+  "falkor_mirror",
+]

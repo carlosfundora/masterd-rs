@@ -1,0 +1,22 @@
+[[services]]
+name = "meilisearch"
+mode = "sidecar"
+binary = "bin/meilisearch"
+notes = "Bundle as external sidecar process and supervise from Rust app."
+
+[[services]]
+name = "lancedb"
+mode = "in_process"
+notes = "Use Rust lancedb crate directly in-process; no standalone daemon required."
+
+[[services]]
+name = "valkey"
+mode = "sidecar"
+binary = "bin/valkey-server"
+notes = "Bundle server binary as sidecar process."
+
+[[services]]
+name = "falkordb-module"
+mode = "sidecar"
+binary = "modules/falkordb.so"
+notes = "Load module into Valkey/Redis sidecar via --loadmodule."

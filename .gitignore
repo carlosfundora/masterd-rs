@@ -1,0 +1,69 @@
+# ── Documentation / research (tracked separately, not in git) ────────────
+*.pdf
+
+/target/
+apps/masterd-desktop-tauri/target/
+apps/masterd-ingest/target/
+apps/*/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# ── Node / Next.js ────────────────────────────────────────────────────────
+node_modules/
+apps/masterd-shell/.next/
+apps/masterd-shell/out/
+.npm/
+
+# ── Runtime / database data ───────────────────────────────────────────────
+data/*.jsonl
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.json
+data/kernel_cache/*
+!data/kernel_cache/.gitkeep
+
+# ── Build output / distribution artifacts ────────────────────────────────
+dist/installer-bundles/*.tar.gz
+dist/installer-bundles/*.deb
+dist/installer-bundles/*.AppImage
+dist/installer-bundles/*.rpm
+apps/masterd-desktop-tauri/binaries/meilisearch
+apps/masterd-desktop-tauri/binaries/valkey-server
+apps/masterd-desktop-tauri/modules/falkordb.so
+
+# ── Python / uv venvs ─────────────────────────────────────────────────────
+.venv/
+services/*/.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# ── Environment / secrets ─────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+# .env.example is intentionally kept (no real secrets)
+
+# ── Editor / OS cruft ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+*~
+.direnv/
+
+# ── Tauri generated schemas (regenerated at build time) ───────────────────
+apps/masterd-desktop-tauri/gen/schemas/
+
+# ── Maturin / candle Python wheel builds ─────────────────────────────────
+vendor/candle/candle-pyo3/dist/
+vendor/candle/candle-pyo3/*.egg-info/
+vendor/candle/target/
+
+# ── Temporary build sources for sidecar binaries ─────────────────────────
+target/valkey-src/

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MASTERd",
+  "version": "0.1.0",
+  "identifier": "com.masterd.desktop",
+  "build": {
+    "frontendDist": "../masterd-shell/out",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "cd ../masterd-shell && npm run dev",
+    "beforeBuildCommand": "cd ../masterd-shell && npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MASTERd",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "copyright": "Copyright (c) 2026 Carlos Fundora",
+    "license": "MIT",
+    "licenseFile": "../../LICENSE",
+    "icon": ["icons/icon.png"],
+    "linux": {
+      "deb": { "depends": [] },
+      "appimage": {}
+    }
+  }
+}

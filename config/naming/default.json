@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "pdf-documents",
+      "priority": 100,
+      "match": {
+        "extensions": ["pdf"],
+        "path_pattern": null
+      },
+      "route": "documents/pdf",
+      "name_template": "{stem}_{hash8}{ext}",
+      "tags": ["pdf", "document"]
+    },
+    {
+      "id": "images",
+      "priority": 90,
+      "match": {
+        "extensions": ["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff"],
+        "path_pattern": null
+      },
+      "route": "media/images",
+      "name_template": "{stem}_{hash8}{ext}",
+      "tags": ["image", "media"]
+    },
+    {
+      "id": "text-documents",
+      "priority": 80,
+      "match": {
+        "extensions": ["txt", "md", "rst", "rtf"],
+        "path_pattern": null
+      },
+      "route": "documents/text",
+      "name_template": "{stem}_{hash8}{ext}",
+      "tags": ["text", "document"]
+    },
+    {
+      "id": "code-files",
+      "priority": 70,
+      "match": {
+        "extensions": ["rs", "py", "js", "ts", "go", "java", "c", "cpp", "h", "hpp"],
+        "path_pattern": null
+      },
+      "route": "code",
+      "name_template": "{stem}_{hash8}{ext}",
+      "tags": ["code"]
+    },
+    {
+      "id": "spreadsheets",
+      "priority": 60,
+      "match": {
+        "extensions": ["xlsx", "xls", "csv", "ods"],
+        "path_pattern": null
+      },
+      "route": "documents/spreadsheets",
+      "name_template": "{stem}_{hash8}{ext}",
+      "tags": ["spreadsheet", "data"]
+    },
+    {
+      "id": "archives",
+      "priority": 50,
+      "match": {
+        "extensions": ["zip", "tar", "gz", "bz2", "7z", "rar"],
+        "path_pattern": null
+      },
+      "route": "archives",
+      "name_template": "{stem}_{hash8}{ext}",
+      "tags": ["archive"]
+    },
+    {
+      "id": "default",
+      "priority": 0,
+      "match": {
+        "extensions": [],
+        "path_pattern": null
+      },
+      "route": "uncategorized",
+      "name_template": "{stem}_{hash8}{ext}",
+      "tags": ["uncategorized"]
+    }
+  ]
+}

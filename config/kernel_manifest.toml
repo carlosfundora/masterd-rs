@@ -1,0 +1,20 @@
+version = "1.0"
+
+[[packs]]
+id = "baseline-cpu-direct"
+source_path = "/home/local/ai/build/kernels/canonical"
+required = ["cpu"]
+
+[[packs]]
+id = "amd-rocm-rdna2"
+source_path = "/home/local/ai/build/kernels/rdna2"
+required = ["cpu", "gpu_amd", "rocm"]
+download_url = "local://ai/build/kernels/rdna2"
+checksum = "dev-local"
+
+[[packs]]
+id = "amd-kernel-stack"
+source_path = "/home/local/ai/build/kernels"
+required = ["cpu", "gpu_amd"]
+download_url = "local://ai/build/kernels"
+checksum = "dev-local"

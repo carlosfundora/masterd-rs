@@ -1,0 +1,23 @@
+[package]
+name = "masterd-midi"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MIDI loader and player for MASTERd — system-player first, built-in oxisynth fallback"
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+
+# MIDI parsing
+midly   = "0.5"
+
+# Pure-Rust SF2 synthesizer (FluidSynth port)
+oxisynth = "0.1"
+
+# Cross-platform audio output
+cpal = "0.15"
+
+# System player detection
+which = "6"

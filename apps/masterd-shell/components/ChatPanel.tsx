@@ -1,0 +1,298 @@
+"use client";
+
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { Bot, Search, Brain, Globe, HardDrive, Layers, Send, ChevronDown, ChevronRight, X, Loader2 } from "lucide-react";
+import { startChat, ThinkMode, SearchMode, ChatStreamToken } from "../lib/tauri-bridge";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type Citation = { title: string; url: string };
+
+type ChatBubble = {
+  id: string;
+  role: "user" | "assistant";
+  thinkText?: string;
+  responseText: string;
+  citations: Citation[];
+  streaming: boolean;
+  thinkExpanded: boolean;
+};
+
+// ── ChatPanel ─────────────────────────────────────────────────────────────────
+
+export default function ChatPanel() {
+  const [messages, setMessages] = useState<ChatBubble[]>([]);
+  const [input, setInput] = useState("");
+  const [thinkMode, setThinkMode] = useState<ThinkMode>("Auto");
+  const [searchMode, setSearchMode] = useState<SearchMode>("LocalDocuments");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [sessionId] = useState(() => crypto.randomUUID());
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<(() => void) | null>(null);
+
+  // Auto-scroll to bottom on new content
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const sendMessage = useCallback(async () => {
+    const text = input.trim();
+    if (!text || isStreaming) return;
+
+    setInput("");
+    setIsStreaming(true);
+
+    const userBubble: ChatBubble = {
+      id: crypto.randomUUID(),
+      role: "user",
+      responseText: text,
+      citations: [],
+      streaming: false,
+      thinkExpanded: false,
+    };
+
+    const assistantId = crypto.randomUUID();
+    const assistantBubble: ChatBubble = {
+      id: assistantId,
+      role: "assistant",
+      thinkText: "",
+      responseText: "",
+      citations: [],
+      streaming: true,
+      thinkExpanded: false,
+    };
+
+    setMessages((prev) => [...prev, userBubble, assistantBubble]);
+
+    const cancel = await startChat(
+      text,
+      thinkMode,
+      searchMode,
+      sessionId,
+      (token: ChatStreamToken) => {
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== assistantId) return m;
+            switch (token.type) {
+              case "think":
+                return { ...m, thinkText: (m.thinkText ?? "") + token.text };
+              case "response":
+                return { ...m, responseText: m.responseText + token.text };
+              case "done":
+                return { ...m, citations: token.citations, streaming: false };
+              case "error":
+                return { ...m, responseText: `[Error: ${token.message}]`, streaming: false };
+              default:
+                return m;
+            }
+          })
+        );
+
+        if (token.type === "done" || token.type === "error") {
+          setIsStreaming(false);
+          cancelRef.current = null;
+        }
+      }
+    );
+
+    cancelRef.current = cancel;
+  }, [input, isStreaming, thinkMode, searchMode, sessionId]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const toggleThink = (bubble: ChatBubble) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === bubble.id ? { ...m, thinkExpanded: !m.thinkExpanded } : m
+      )
+    );
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-[#060A10] border-l border-[#183040] min-w-0 w-full">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-[#183040] flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <Bot className="w-4 h-4 text-[#00E5FF]" />
+          <span className="text-[11px] font-mono font-bold tracking-widest text-[#00E5FF] uppercase">
+            MASTERd Intelligence
+          </span>
+        </div>
+        <div className="text-[9px] font-mono text-[#3A5568] uppercase tracking-widest">LFM2.5 · LOCAL</div>
+      </div>
+
+      {/* Mode controls */}
+      <div className="px-4 py-2 border-b border-[#183040] flex items-center gap-3 shrink-0 flex-wrap">
+        {/* Think mode */}
+        <div className="flex items-center gap-1.5">
+          <Brain className="w-3 h-3 text-[#6C8798]" />
+          <span className="text-[9px] font-mono text-[#6C8798] uppercase">Think:</span>
+          {(["Auto", "Thinking", "Instruct"] as ThinkMode[]).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setThinkMode(mode)}
+              className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded-[2px] border transition-all ${
+                thinkMode === mode
+                  ? "border-[#00E5FF]/50 text-[#00E5FF] bg-[#00E5FF]/10"
+                  : "border-[#183040] text-[#3A5568] hover:text-[#6C8798]"
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+
+        {/* Divider */}
+        <div className="h-4 w-px bg-[#183040]" />
+
+        {/* Search mode */}
+        <div className="flex items-center gap-1.5">
+          <Search className="w-3 h-3 text-[#6C8798]" />
+          <span className="text-[9px] font-mono text-[#6C8798] uppercase">Search:</span>
+          {(
+            [
+              ["LocalDocuments", <HardDrive key="l" className="w-3 h-3" />, "Local"],
+              ["WebSearch", <Globe key="w" className="w-3 h-3" />, "Web"],
+              ["Both", <Layers key="b" className="w-3 h-3" />, "Both"],
+            ] as [SearchMode, React.ReactNode, string][]
+          ).map(([mode, icon, label]) => (
+            <button
+              key={mode}
+              onClick={() => setSearchMode(mode)}
+              className={`flex items-center gap-1 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded-[2px] border transition-all ${
+                searchMode === mode
+                  ? "border-[#00E5FF]/50 text-[#00E5FF] bg-[#00E5FF]/10"
+                  : "border-[#183040] text-[#3A5568] hover:text-[#6C8798]"
+              }`}
+            >
+              {icon}
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-center gap-3 opacity-40">
+            <Bot className="w-8 h-8 text-[#00E5FF]" />
+            <p className="text-[11px] font-mono text-[#6C8798] max-w-xs">
+              Ask MASTERd anything about your documents or any topic. Uses your indexed documents + optional web search.
+            </p>
+          </div>
+        )}
+
+        {messages.map((bubble) => (
+          <div
+            key={bubble.id}
+            className={`flex flex-col gap-1 ${bubble.role === "user" ? "items-end" : "items-start"}`}
+          >
+            {/* Think block (collapsible) */}
+            {bubble.role === "assistant" && bubble.thinkText && (
+              <div className="w-full max-w-[90%]">
+                <button
+                  onClick={() => toggleThink(bubble)}
+                  className="flex items-center gap-1.5 text-[9px] font-mono text-[#4A6878] hover:text-[#6C8798] uppercase tracking-widest transition-colors"
+                >
+                  {bubble.thinkExpanded ? (
+                    <ChevronDown className="w-3 h-3" />
+                  ) : (
+                    <ChevronRight className="w-3 h-3" />
+                  )}
+                  <Brain className="w-3 h-3" />
+                  Reasoning chain
+                </button>
+                {bubble.thinkExpanded && (
+                  <div className="mt-1 p-2.5 bg-[#0B1018] border border-[#1E3040] rounded-[4px] text-[10px] font-mono text-[#4A6878] whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+                    {bubble.thinkText}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Main bubble */}
+            <div
+              className={`rounded-[6px] px-3 py-2 text-[12px] leading-relaxed max-w-[90%] whitespace-pre-wrap ${
+                bubble.role === "user"
+                  ? "bg-[#00E5FF]/10 border border-[#00E5FF]/20 text-[#A7C7D9] ml-8"
+                  : "bg-[#0B1018] border border-[#183040] text-[#E6F7FF] mr-8"
+              }`}
+            >
+              {bubble.responseText || (bubble.streaming ? "" : "…")}
+              {bubble.streaming && (
+                <span className="inline-flex items-center gap-1 ml-1">
+                  <span className="w-1 h-3 bg-[#00E5FF] animate-pulse inline-block" />
+                </span>
+              )}
+            </div>
+
+            {/* Citations */}
+            {bubble.citations.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 max-w-[90%] mt-0.5">
+                {bubble.citations.map((c, i) => (
+                  <a
+                    key={i}
+                    href={c.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[9px] font-mono text-[#00E5FF]/60 border border-[#183040] px-1.5 py-0.5 rounded-[2px] hover:text-[#00E5FF] hover:border-[#00E5FF]/30 transition-colors truncate max-w-[18ch]"
+                    title={c.title}
+                  >
+                    [{i + 1}] {c.title}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Input area */}
+      <div className="px-4 py-3 border-t border-[#183040] shrink-0">
+        <div className="flex items-end gap-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask MASTERd…"
+            rows={2}
+            disabled={isStreaming}
+            className="flex-1 bg-[#0B1018] border border-[#183040] rounded-[4px] px-3 py-2 text-[12px] text-[#E6F7FF] placeholder-[#3A5568] font-mono resize-none focus:outline-none focus:border-[#00E5FF]/40 disabled:opacity-50 leading-relaxed"
+          />
+          {isStreaming ? (
+            <button
+              onClick={() => {
+                cancelRef.current?.();
+                setIsStreaming(false);
+              }}
+              className="p-2 text-[#6C8798] hover:text-red-400 border border-[#183040] rounded-[4px] transition-colors"
+              title="Stop"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim()}
+              className="p-2 text-[#00E5FF] border border-[#00E5FF]/30 rounded-[4px] bg-[#00E5FF]/10 hover:bg-[#00E5FF]/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-[0_0_8px_rgba(0,229,255,0.1)]"
+              title="Send (Enter)"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        <div className="mt-1.5 text-[9px] font-mono text-[#3A5568]">
+          Enter to send · Shift+Enter for newline · {thinkMode} mode · {searchMode.replace(/([A-Z])/g, " $1").trim()}
+        </div>
+      </div>
+    </div>
+  );
+}

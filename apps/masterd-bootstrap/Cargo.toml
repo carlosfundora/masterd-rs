@@ -1,0 +1,18 @@
+[package]
+name = "masterd-bootstrap"
+authors.workspace = true
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+masterd-core = { path = "../../crates/masterd-core" }
+masterd-prompt-core = { path = "../../crates/masterd-prompt-core" }
+masterd-runtime-tune = { path = "../../crates/masterd-runtime-tune" }
+masterd-sidecars = { path = "../../crates/masterd-sidecars" }
+serde.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
