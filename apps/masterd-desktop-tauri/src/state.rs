@@ -250,11 +250,10 @@ impl AppState {
         }
 
         let restored_config = self.config.lock().await.clone();
-        match DataStore::open(DataStoreConfig {
-            db_path: dirs.user_data.join("masterd.sqlite"),
-            meilisearch_url: Some("http://127.0.0.1:7700".to_string()),
-            valkey_url: Some("redis://127.0.0.1:6399/".to_string()),
-        }) {
+        let mut data_config = DataStoreConfig::local(dirs.user_data.join("masterd.sqlite"));
+        data_config.embedding_url = Some(restored_config.jina_url.clone());
+        data_config.colbert_url = Some(restored_config.colbert_url.clone());
+        match DataStore::open(data_config) {
             Ok(store) => {
                 tracing::info!(
                     db = %store.db_path().display(),

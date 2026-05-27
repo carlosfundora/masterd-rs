@@ -1757,6 +1757,351 @@ impl MeilisearchClient {
         }
         Ok(())
     }
+
+    fn search_chunks(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
+        #[derive(Debug, Deserialize)]
+        struct SearchResponse {
+            hits: Vec<MeiliChunkHit>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct MeiliChunkHit {
+            id: String,
+            document_id: String,
+            title: String,
+            path: String,
+            text: String,
+            #[serde(default, rename = "_rankingScore", alias = "_ranking_score")]
+            ranking_score: Option<f32>,
+        }
+
+        let url = format!("{}/indexes/masterd_chunks/search", self.base_url.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(&serde_json::json!({
+                "q": query,
+                "limit": limit,
+                "showRankingScore": true,
+            }))
+            .send()?;
+        if !response.status().is_success() {
+            anyhow::bail!("meilisearch search failed: HTTP {}", response.status());
+        }
+        let body: SearchResponse = response.json()?;
+        Ok(body
+            .hits
+            .into_iter()
+            .map(|hit| RetrievalCandidate {
+                document_id: hit.document_id,
+                chunk_id: hit.id,
+                title: hit.title,
+                path: hit.path,
+                text: hit.text,
+                score: hit.ranking_score.unwrap_or(1.0),
+                source_stage: "meilisearch".to_string(),
+            })
+            .collect())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StoredEmbedding {
+    vector: Vec<f32>,
+    provider: String,
+}
+
+#[derive(Debug, Clone)]
+struct EmbeddingServiceClient {
+    base_url: String,
+    model: String,
+    client: Client,
+}
+
+impl EmbeddingServiceClient {
+    fn new(base_url: String, model: String) -> Self {
+        Self {
+            base_url,
+            model,
+            client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
+        }
+    }
+
+    fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
+        Ok(self
+            .embed_batch(&[text.to_string()])?
+            .into_iter()
+            .next()
+            .map(|embedding| embedding.vector)
+            .unwrap_or_default())
+    }
+
+    fn embed_batch(&self, texts: &[String]) -> Result<Vec<StoredEmbedding>> {
+        #[derive(Debug, Deserialize)]
+        struct EmbeddingDatum {
+            embedding: Vec<f32>,
+            #[serde(default)]
+            index: Option<usize>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct EmbeddingResponse {
+            #[serde(default)]
+            embeddings: Option<Vec<Vec<f32>>>,
+            #[serde(default)]
+            data: Option<Vec<EmbeddingDatum>>,
+            #[serde(default)]
+            model: Option<String>,
+        }
+
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let url = format!("{}/v1/embeddings", self.base_url.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(&serde_json::json!({
+                "input": texts,
+                "model": self.model,
+            }))
+            .send()?;
+        if !response.status().is_success() {
+            anyhow::bail!("embedding service failed: HTTP {}", response.status());
+        }
+        let body: EmbeddingResponse = response.json()?;
+        let provider = body.model.unwrap_or_else(|| self.model.clone());
+        let mut vectors = if let Some(mut data) = body.data {
+            data.sort_by_key(|datum| datum.index.unwrap_or(usize::MAX));
+            data.into_iter().map(|datum| datum.embedding).collect::<Vec<_>>()
+        } else {
+            body.embeddings.unwrap_or_default()
+        };
+        vectors.truncate(texts.len());
+        Ok(vectors
+            .into_iter()
+            .map(|mut vector| {
+                normalize_vector(&mut vector);
+                StoredEmbedding { vector, provider: provider.clone() }
+            })
+            .collect())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ColbertRerankerClient {
+    base_url: String,
+    client: Client,
+}
+
+impl ColbertRerankerClient {
+    fn new(base_url: String) -> Self {
+        Self {
+            base_url,
+            client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
+        }
+    }
+
+    fn rerank(&self, query: &str, candidates: &[RetrievalCandidate], top_k: usize) -> Result<Vec<RetrievalCandidate>> {
+        #[derive(Debug, Deserialize)]
+        struct RerankResult {
+            index: usize,
+            #[serde(default, alias = "relevance_score")]
+            score: f32,
+        }
+        #[derive(Debug, Deserialize)]
+        struct RerankResponse {
+            #[serde(default)]
+            results: Vec<RerankResult>,
+            #[serde(default)]
+            ranked_indices: Vec<usize>,
+            #[serde(default)]
+            scores: Vec<f32>,
+        }
+
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let documents = candidates.iter().map(|candidate| candidate.text.clone()).collect::<Vec<_>>();
+        let url = format!("{}/v1/rerank", self.base_url.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(&serde_json::json!({
+                "query": query,
+                "documents": documents,
+                "top_k": top_k,
+            }))
+            .send()?;
+        if !response.status().is_success() {
+            anyhow::bail!("colbert rerank failed: HTTP {}", response.status());
+        }
+        let body: RerankResponse = response.json()?;
+        let pairs = if body.results.is_empty() {
+            body.ranked_indices
+                .into_iter()
+                .enumerate()
+                .map(|(rank, index)| {
+                    let fallback = 1.0f32 / (rank as f32 + 1.0);
+                    (index, body.scores.get(rank).copied().unwrap_or(fallback))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            body.results.into_iter().map(|result| (result.index, result.score)).collect()
+        };
+        let mut out = Vec::new();
+        for (index, score) in pairs {
+            if let Some(candidate) = candidates.get(index) {
+                let mut candidate = candidate.clone();
+                candidate.score = score;
+                candidate.source_stage = "colbert_rerank".to_string();
+                out.push(candidate);
+            }
+            if out.len() >= top_k {
+                break;
+            }
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LanceVectorRecord {
+    id: String,
+    document_id: String,
+    text: String,
+    vector: Vec<f32>,
+    metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone)]
+struct LanceDbClient {
+    base_url: String,
+    client: Client,
+}
+
+impl LanceDbClient {
+    fn new(base_url: String) -> Self {
+        Self {
+            base_url,
+            client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
+        }
+    }
+
+    fn upsert_records(&self, records: &[LanceVectorRecord]) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        let url = format!("{}/upsert", self.base_url.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(&serde_json::json!({
+                "table": "masterd_chunks",
+                "records": records,
+            }))
+            .send()?;
+        if !response.status().is_success() {
+            anyhow::bail!("lancedb upsert failed: HTTP {}", response.status());
+        }
+        Ok(())
+    }
+
+    fn search(&self, vector: &[f32], limit: usize) -> Result<Vec<RetrievalCandidate>> {
+        #[derive(Debug, Deserialize)]
+        struct LanceRow {
+            id: String,
+            document_id: String,
+            #[serde(default)]
+            title: Option<String>,
+            #[serde(default)]
+            path: Option<String>,
+            text: String,
+            #[serde(default, alias = "_distance")]
+            score: Option<f32>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct LanceSearchResponse {
+            #[serde(default, alias = "results")]
+            rows: Vec<LanceRow>,
+        }
+
+        let url = format!("{}/search", self.base_url.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(&serde_json::json!({
+                "table": "masterd_chunks",
+                "vector": vector,
+                "limit": limit,
+            }))
+            .send()?;
+        if !response.status().is_success() {
+            anyhow::bail!("lancedb search failed: HTTP {}", response.status());
+        }
+        let body: LanceSearchResponse = response.json()?;
+        Ok(body
+            .rows
+            .into_iter()
+            .map(|row| RetrievalCandidate {
+                document_id: row.document_id,
+                chunk_id: row.id,
+                title: row.title.unwrap_or_default(),
+                path: row.path.unwrap_or_default(),
+                text: row.text,
+                score: row.score.unwrap_or(0.0),
+                source_stage: "semantic_matryoshka".to_string(),
+            })
+            .collect())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct FalkorDbClient {
+    client: redis::Client,
+}
+
+impl FalkorDbClient {
+    fn new(url: String) -> Result<Self> {
+        Ok(Self { client: redis::Client::open(url)? })
+    }
+
+    fn mirror_document(&self, doc: &DocumentRecord) -> Result<()> {
+        let mut conn = self.client.get_connection()?;
+        let doc_name = cypher_string(&doc.current_name);
+        let doc_path = cypher_string(&doc.current_path);
+        let doc_id = cypher_string(&doc.id);
+        let category = doc
+            .classification
+            .as_ref()
+            .map(|classification| classification.category.as_str())
+            .unwrap_or("General / Document");
+        let query = format!(
+            "MERGE (d:Document {{id: {doc_id}}}) SET d.title = {doc_name}, d.path = {doc_path} \
+             MERGE (c:Category {{name: {}}}) MERGE (d)-[:CLASSIFIED_AS]->(c)",
+            cypher_string(category)
+        );
+        let _: redis::Value = redis::cmd("GRAPH.QUERY").arg("masterd").arg(query).query(&mut conn)?;
+        for tag in &doc.tags {
+            let query = format!(
+                "MATCH (d:Document {{id: {doc_id}}}) MERGE (t:Tag {{name: {}}}) MERGE (d)-[:HAS_TAG]->(t)",
+                cypher_string(tag)
+            );
+            let _: redis::Value = redis::cmd("GRAPH.QUERY").arg("masterd").arg(query).query(&mut conn)?;
+        }
+        Ok(())
+    }
+}
+
+fn cypher_string(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 #[derive(Debug)]
@@ -1968,6 +2313,15 @@ fn hashed_embedding(text: &str, dim: usize) -> Vec<f32> {
     vector
 }
 
+fn normalize_vector(vector: &mut [f32]) {
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in vector {
+            *value /= norm;
+        }
+    }
+}
+
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
@@ -2148,7 +2502,14 @@ mod tests {
     fn migrations_record_version() {
         let path = std::env::temp_dir().join(format!("masterd-data-test-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        let store = DataStore::open(DataStoreConfig { db_path: path.clone(), meilisearch_url: None, valkey_url: None }).unwrap();
+        let mut config = DataStoreConfig::local(path.clone());
+        config.meilisearch_url = None;
+        config.valkey_url = None;
+        config.embedding_url = None;
+        config.colbert_url = None;
+        config.lancedb_url = None;
+        config.falkordb_url = None;
+        let store = DataStore::open(config).unwrap();
         assert_eq!(store.migration_versions().unwrap(), vec![1]);
         let _ = std::fs::remove_file(path);
     }
@@ -2157,7 +2518,14 @@ mod tests {
     fn preference_promotes_after_evidence() {
         let path = std::env::temp_dir().join(format!("masterd-pref-test-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        let store = DataStore::open(DataStoreConfig { db_path: path.clone(), meilisearch_url: None, valkey_url: None }).unwrap();
+        let mut config = DataStoreConfig::local(path.clone());
+        config.meilisearch_url = None;
+        config.valkey_url = None;
+        config.embedding_url = None;
+        config.colbert_url = None;
+        config.lancedb_url = None;
+        config.falkordb_url = None;
+        let store = DataStore::open(config).unwrap();
         let mut last = None;
         for i in 0..3 {
             last = Some(store.store_preference_event(PreferenceEvent {

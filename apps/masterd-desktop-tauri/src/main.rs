@@ -7,7 +7,7 @@ mod sidecars;
 use state::AppState;
 use sidecars::SidecarSupervisor;
 use masterd_chat_engine::ChatToken;
-use masterd_data::{DataStore, IngestConfig, PreferenceEvent, SearchMode as DataSearchMode};
+use masterd_data::{DataStore, PreferenceEvent, SearchMode as DataSearchMode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
@@ -88,6 +88,10 @@ pub struct DocumentRecord {
     pub processing_status: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrieval_score: Option<f32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub source_stages: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -300,7 +304,7 @@ async fn intake_add_files(
     state: State<'_, AppState>,
     paths: Vec<String>,
     #[allow(unused)] profileId: Option<String>,
-) -> ApiResult<Vec<crate::state::IntakeQueueItem>> {
+) -> Result<ApiResult<Vec<crate::state::IntakeQueueItem>>, String> {
     let store = data_store(&state);
     let mut items = Vec::new();
     for path in paths {
@@ -368,48 +372,48 @@ async fn intake_add_files(
         state.intake_queue.lock().await.extend(items.clone());
     }
 
-    ok(items)
+    Ok(ok(items))
 }
 
 #[tauri::command]
-async fn intake_retry_item(state: State<'_, AppState>, id: String) -> ApiResult<crate::state::IntakeQueueItem> {
+async fn intake_retry_item(state: State<'_, AppState>, id: String) -> Result<ApiResult<crate::state::IntakeQueueItem>, String> {
     let mut queue = state.intake_queue.lock().await;
     if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
         item.status = "queued".into();
         item.progress = 0;
         item.updated_at = now_ts();
-        return ok(item.clone());
+        return Ok(ok(item.clone()));
     }
-    ok(empty_intake_item(id))
+    Ok(ok(empty_intake_item(id)))
 }
 
 #[tauri::command]
-async fn intake_cancel_item(state: State<'_, AppState>, id: String) -> ApiResult<crate::state::IntakeQueueItem> {
+async fn intake_cancel_item(state: State<'_, AppState>, id: String) -> Result<ApiResult<crate::state::IntakeQueueItem>, String> {
     let mut queue = state.intake_queue.lock().await;
     if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
         item.status = "error".into();
         item.progress = 0;
         item.updated_at = now_ts();
-        return ok(item.clone());
+        return Ok(ok(item.clone()));
     }
     let mut item = empty_intake_item(id);
     item.status = "error".into();
     item.progress = 0;
-    ok(item)
+    Ok(ok(item))
 }
 
 #[tauri::command]
-async fn documents_get_by_id(state: State<'_, AppState>, id: String) -> ApiResult<DocumentRecord> {
+async fn documents_get_by_id(state: State<'_, AppState>, id: String) -> Result<ApiResult<DocumentRecord>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(Some(doc)) = store.get_document(&id) {
-            return ok(map_document(doc));
+            return Ok(ok(map_document(doc)));
         }
     }
-    ok(empty_document(id))
+    Ok(ok(empty_document(id)))
 }
 
 #[tauri::command]
-async fn documents_get_preview(state: State<'_, AppState>, id: String) -> ApiResult<DocumentPreview> {
+async fn documents_get_preview(state: State<'_, AppState>, id: String) -> Result<ApiResult<DocumentPreview>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(Some(doc)) = store.get_document(&id) {
             let preview = doc
@@ -420,26 +424,26 @@ async fn documents_get_preview(state: State<'_, AppState>, id: String) -> ApiRes
                 .take(120)
                 .collect::<Vec<_>>()
                 .join(" ");
-            return ok(DocumentPreview {
+            return Ok(ok(DocumentPreview {
                 document_id: doc.id,
                 text_preview: preview,
                 page_count: 1,
                 thumbnail_url: None,
                 mime_type: doc.mime_type,
-            });
+            }));
         }
     }
-    ok(DocumentPreview {
+    Ok(ok(DocumentPreview {
         document_id: id,
         text_preview: String::new(),
         page_count: 0,
         thumbnail_url: None,
         mime_type: "text/plain".into(),
-    })
+    }))
 }
 
 #[tauri::command]
-async fn documents_get_extracted_text(state: State<'_, AppState>, id: String) -> ApiResult<ExtractedTextResult> {
+async fn documents_get_extracted_text(state: State<'_, AppState>, id: String) -> Result<ApiResult<ExtractedTextResult>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(Some(doc)) = store.get_document(&id) {
             let entities = doc
@@ -447,36 +451,36 @@ async fn documents_get_extracted_text(state: State<'_, AppState>, id: String) ->
                 .iter()
                 .map(|tag| serde_json::json!({ "text": tag, "label": "TAG", "confidence": 1.0 }))
                 .collect();
-            return ok(ExtractedTextResult {
+            return Ok(ok(ExtractedTextResult {
                 document_id: doc.id,
                 full_text: doc.extracted_text.unwrap_or_default(),
                 language: None,
                 entities,
-            });
+            }));
         }
     }
-    ok(ExtractedTextResult {
+    Ok(ok(ExtractedTextResult {
         document_id: id,
         full_text: String::new(),
         language: None,
         entities: vec![],
-    })
+    }))
 }
 
 #[tauri::command]
-async fn documents_update_tags(state: State<'_, AppState>, id: String, tags: Vec<String>) -> ApiResult<DocumentRecord> {
+async fn documents_update_tags(state: State<'_, AppState>, id: String, tags: Vec<String>) -> Result<ApiResult<DocumentRecord>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(Some(doc)) = store.update_document_tags(&id, &tags) {
-            return ok(map_document(doc));
+            return Ok(ok(map_document(doc)));
         }
     }
     let mut doc = empty_document(id);
     doc.tags = tags;
-    ok(doc)
+    Ok(ok(doc))
 }
 
 #[tauri::command]
-async fn documents_reprocess(state: State<'_, AppState>, id: String, #[allow(unused)] options: Option<serde_json::Value>) -> ApiResult<PipelineJob> {
+async fn documents_reprocess(state: State<'_, AppState>, id: String, #[allow(unused)] options: Option<serde_json::Value>) -> Result<ApiResult<PipelineJob>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(Some(doc)) = store.get_document(&id) {
             let config = state.config.lock().await.clone();
@@ -489,10 +493,10 @@ async fn documents_reprocess(state: State<'_, AppState>, id: String, #[allow(unu
             .await
             .map_err(|err| err.to_string())?
             .map_err(|err| err.to_string())?;
-            return ok(map_pipeline_run(ingest_result.run));
+            return Ok(ok(map_pipeline_run(ingest_result.run)));
         }
     }
-    ok(empty_pipeline_job(id))
+    Ok(ok(empty_pipeline_job(id)))
 }
 
 fn empty_intake_item(id: String) -> crate::state::IntakeQueueItem {
@@ -533,6 +537,8 @@ fn empty_document(id: String) -> DocumentRecord {
         processing_status: "new".into(),
         created_at: now.clone(),
         updated_at: now,
+        retrieval_score: None,
+        source_stages: vec![],
     }
 }
 
@@ -591,10 +597,13 @@ fn map_document(doc: masterd_data::DocumentRecord) -> DocumentRecord {
         processing_status: doc.processing_status,
         created_at: doc.created_at,
         updated_at: doc.updated_at,
+        retrieval_score: None,
+        source_stages: vec![],
     }
 }
 
 fn map_pipeline_run(run: masterd_data::PipelineRun) -> PipelineJob {
+    let run_id = run.id.clone();
     let file_name = std::path::Path::new(&run.file_path)
         .file_name()
         .and_then(|name| name.to_str())
@@ -618,7 +627,7 @@ fn map_pipeline_run(run: masterd_data::PipelineRun) -> PipelineJob {
             .stage_timings
             .iter()
             .map(|stage| json!({
-                "id": format!("{}:{}", run.id, stage.stage),
+                "id": format!("{}:{}", run_id, stage.stage),
                 "level": if stage.status == "complete" { "info" } else { "warning" },
                 "message": format!("{} {}", stage.stage, stage.status),
                 "createdAt": run.updated_at,
@@ -804,29 +813,29 @@ async fn actions_mark_unique(documentId: String) -> ApiResult<ActionResult> {
 }
 
 #[tauri::command]
-async fn pipeline_list_jobs(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> ApiResult<Paginated<PipelineJob>> {
+async fn pipeline_list_jobs(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> Result<ApiResult<Paginated<PipelineJob>>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(runs) = store.list_pipeline_runs(100, 0) {
             let items = runs.into_iter().map(map_pipeline_run).collect::<Vec<_>>();
             let total = items.len() as u64;
-            return ok(Paginated { items, total, limit: 100, offset: 0 });
+            return Ok(ok(Paginated { items, total, limit: 100, offset: 0 }));
         }
     }
-    ok(Paginated::empty())
+    Ok(ok(Paginated::empty()))
 }
 
 #[tauri::command]
-async fn pipeline_get_job(state: State<'_, AppState>, id: String) -> ApiResult<PipelineJob> {
+async fn pipeline_get_job(state: State<'_, AppState>, id: String) -> Result<ApiResult<PipelineJob>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(Some(run)) = store.get_pipeline_run(&id) {
-            return ok(map_pipeline_run(run));
+            return Ok(ok(map_pipeline_run(run)));
         }
     }
-    ok(empty_pipeline_job(id))
+    Ok(ok(empty_pipeline_job(id)))
 }
 
 #[tauri::command]
-async fn pipeline_retry_job(state: State<'_, AppState>, id: String) -> ApiResult<PipelineJob> {
+async fn pipeline_retry_job(state: State<'_, AppState>, id: String) -> Result<ApiResult<PipelineJob>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(Some(run)) = store.get_pipeline_run(&id) {
             let path = run.file_path.clone();
@@ -840,47 +849,47 @@ async fn pipeline_retry_job(state: State<'_, AppState>, id: String) -> ApiResult
             .await
             .map_err(|err| err.to_string())?
             .map_err(|err| err.to_string()) {
-                return ok(map_pipeline_run(updated.run));
+                return Ok(ok(map_pipeline_run(updated.run)));
             }
-            return ok(map_pipeline_run(run));
+            return Ok(ok(map_pipeline_run(run)));
         }
     }
-    ok(empty_pipeline_job(id))
+    Ok(ok(empty_pipeline_job(id)))
 }
 
 #[tauri::command]
-async fn pipeline_cancel_job(state: State<'_, AppState>, id: String) -> ApiResult<PipelineJob> {
+async fn pipeline_cancel_job(state: State<'_, AppState>, id: String) -> Result<ApiResult<PipelineJob>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(Some(run)) = store.update_pipeline_run_status(&id, "error", Some("cancelled")) {
-            return ok(map_pipeline_run(run));
+            return Ok(ok(map_pipeline_run(run)));
         }
     }
     let mut job = empty_pipeline_job(id);
     job.status = "error".into();
     job.error_message = Some("cancelled".into());
-    ok(job)
+    Ok(ok(job))
 }
 
 #[tauri::command]
-async fn review_list(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> ApiResult<Paginated<ReviewItem>> {
+async fn review_list(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> Result<ApiResult<Paginated<ReviewItem>>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(items) = store.list_review_items(100, 0) {
             let items = items.into_iter().map(map_review).collect::<Vec<_>>();
             let total = items.len() as u64;
-            return ok(Paginated { items, total, limit: 100, offset: 0 });
+            return Ok(ok(Paginated { items, total, limit: 100, offset: 0 }));
         }
     }
-    ok(Paginated::empty())
+    Ok(ok(Paginated::empty()))
 }
 
 #[tauri::command]
-async fn review_resolve(state: State<'_, AppState>, id: String, resolution: serde_json::Value) -> ApiResult<ReviewItem> {
+async fn review_resolve(state: State<'_, AppState>, id: String, resolution: serde_json::Value) -> Result<ApiResult<ReviewItem>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(Some(item)) = store.resolve_review(&id, resolution.get("approved").and_then(|v| v.as_bool()).unwrap_or(true)) {
-            return ok(map_review(item));
+            return Ok(ok(map_review(item)));
         }
     }
-    ok(ReviewItem {
+    Ok(ok(ReviewItem {
         id,
         document_id: String::new(),
         reason: "low_confidence_classification".into(),
@@ -890,7 +899,7 @@ async fn review_resolve(state: State<'_, AppState>, id: String, resolution: serd
         proposed_action: None,
         created_at: now_ts(),
         resolved: Some(true),
-    })
+    }))
 }
 
 #[tauri::command]
@@ -933,35 +942,131 @@ async fn rules_test(rule: serde_json::Value, documentId: Option<String>) -> ApiR
 }
 
 #[tauri::command]
-async fn audit_list(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> ApiResult<Paginated<AuditEntry>> {
+async fn audit_list(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> Result<ApiResult<Paginated<AuditEntry>>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(items) = store.list_audit_entries(100, 0) {
             let items = items.into_iter().map(map_audit).collect::<Vec<_>>();
             let total = items.len() as u64;
-            return ok(Paginated { items, total, limit: 100, offset: 0 });
+            return Ok(ok(Paginated { items, total, limit: 100, offset: 0 }));
         }
     }
-    ok(Paginated::empty())
+    Ok(ok(Paginated::empty()))
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn audit_get_for_document(state: State<'_, AppState>, documentId: String) -> ApiResult<Vec<AuditEntry>> {
+async fn audit_get_for_document(state: State<'_, AppState>, documentId: String) -> Result<ApiResult<Vec<AuditEntry>>, String> {
     if let Some(store) = data_store(&state) {
         if let Ok(items) = store.audit_entries_for_document(&documentId) {
-            return ok(items.into_iter().map(map_audit).collect());
+            return Ok(ok(items.into_iter().map(map_audit).collect()));
         }
     }
-    ok(vec![])
+    Ok(ok(vec![]))
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn audit_revert(state: State<'_, AppState>, entryId: String) -> ApiResult<ActionResult> {
+async fn audit_revert(state: State<'_, AppState>, entryId: String) -> Result<ApiResult<ActionResult>, String> {
     if data_store(&state).is_some() {
-        return ok(empty_action(entryId, "audit entry reverted"));
+        return Ok(ok(empty_action(entryId, "audit entry reverted")));
     }
-    ok(empty_action(entryId, "audit entry reverted"))
+    Ok(ok(empty_action(entryId, "audit entry reverted")))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferenceEventRequest {
+    pub category: String,
+    pub signal: String,
+    pub value: String,
+    pub source: Option<String>,
+    pub confidence: Option<f32>,
+}
+
+#[tauri::command]
+async fn preferences_list(state: State<'_, AppState>) -> Result<ApiResult<Vec<masterd_data::LearnedPreference>>, String> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(preferences) = store.list_preferences() {
+            return Ok(ok(preferences));
+        }
+    }
+    Ok(ok(vec![]))
+}
+
+#[tauri::command]
+async fn preferences_record_event(
+    state: State<'_, AppState>,
+    event: PreferenceEventRequest,
+) -> Result<ApiResult<masterd_data::LearnedPreference>, String> {
+    let Some(store) = data_store(&state) else {
+        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
+    };
+    let learned = store
+        .store_preference_event(PreferenceEvent {
+            id: Uuid::new_v4().to_string(),
+            category: event.category,
+            signal: event.signal,
+            value: event.value,
+            source: event.source.unwrap_or_else(|| "desktop".to_string()),
+            confidence: event.confidence.unwrap_or(0.75).clamp(0.0, 1.0),
+            created_at: chrono_like_now(),
+        })
+        .map_err(|err| err.to_string())?;
+    Ok(ok(learned))
+}
+
+#[tauri::command]
+async fn preferences_approve(state: State<'_, AppState>, id: String) -> Result<ApiResult<masterd_data::LearnedPreference>, String> {
+    let Some(store) = data_store(&state) else {
+        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
+    };
+    match store.set_preference_status(&id, "approved").map_err(|err| err.to_string())? {
+        Some(preference) => Ok(ok(preference)),
+        None => Ok(err_result("NOT_FOUND", format!("Preference '{id}' was not found"), false)),
+    }
+}
+
+#[tauri::command]
+async fn preferences_dismiss(state: State<'_, AppState>, id: String) -> Result<ApiResult<masterd_data::LearnedPreference>, String> {
+    let Some(store) = data_store(&state) else {
+        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
+    };
+    match store.set_preference_status(&id, "dismissed").map_err(|err| err.to_string())? {
+        Some(preference) => Ok(ok(preference)),
+        None => Ok(err_result("NOT_FOUND", format!("Preference '{id}' was not found"), false)),
+    }
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrievalExplainRequest {
+    pub trace_id: Option<String>,
+    pub query: Option<String>,
+    pub mode: Option<String>,
+    pub top_k: Option<usize>,
+}
+
+#[tauri::command]
+async fn retrieval_explain(
+    state: State<'_, AppState>,
+    params: RetrievalExplainRequest,
+) -> Result<ApiResult<masterd_data::RetrievalTrace>, String> {
+    let Some(store) = data_store(&state) else {
+        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical retrieval store is unavailable", true));
+    };
+    if let Some(trace_id) = params.trace_id {
+        if let Some(trace) = store.get_retrieval_trace(&trace_id).map_err(|err| err.to_string())? {
+            return Ok(ok(trace));
+        }
+        return Ok(err_result("NOT_FOUND", format!("Retrieval trace '{trace_id}' was not found"), false));
+    }
+    let query = params.query.unwrap_or_default();
+    if query.trim().is_empty() {
+        return Ok(err_result("EMPTY_QUERY", "retrieval.explain requires a traceId or query", true));
+    }
+    let mode = params.mode.as_deref().map(DataSearchMode::from_str_lossy).unwrap_or_default();
+    let trace = store.search(&query, mode, params.top_k.unwrap_or(8).max(1)).map_err(|err| err.to_string())?;
+    Ok(ok(trace))
 }
 
 fn empty_rule(id: String) -> AutomationRule {
@@ -1057,13 +1162,17 @@ pub struct IndexDocumentResponse {
 }
 
 #[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentSearchQuery {
     pub text: Option<String>,
+    pub mode: Option<String>,
+    pub filters: Option<serde_json::Value>,
     pub limit: Option<usize>,
+    pub top_k: Option<usize>,
     pub offset: Option<usize>,
 }
 
-/// Search the local BM25 index.
+/// Search the canonical hybrid retrieval store; BM25 remains an offline fallback.
 #[tauri::command]
 async fn documents_search(
     state: State<'_, AppState>,
@@ -1071,28 +1180,47 @@ async fn documents_search(
 ) -> Result<ApiResult<Paginated<DocumentRecord>>, String> {
     let p = params.unwrap_or_default();
     let query = p.text.unwrap_or_default();
-    let top_k = p.limit.unwrap_or(50).min(50);
+    let top_k = p.top_k.or(p.limit).unwrap_or(50).min(50);
     if let Some(store) = data_store(&state) {
-        if let Ok(mut docs) = store.list_documents(1000, 0) {
-            if !query.trim().is_empty() {
-                let lower = query.to_lowercase();
-                docs.retain(|doc| {
-                    doc.current_name.to_lowercase().contains(&lower)
-                        || doc.original_name.to_lowercase().contains(&lower)
-                        || doc.current_path.to_lowercase().contains(&lower)
-                        || doc.tags.iter().any(|tag| tag.to_lowercase().contains(&lower))
-                        || doc.extracted_text.as_ref().map(|text| text.to_lowercase().contains(&lower)).unwrap_or(false)
-                        || doc.summary.as_ref().map(|text| text.to_lowercase().contains(&lower)).unwrap_or(false)
-                });
+        if query.trim().is_empty() {
+            if let Ok(docs) = store.list_documents(top_k, p.offset.unwrap_or(0)) {
+                let items = docs.into_iter().map(map_document).collect::<Vec<_>>();
+                let total = items.len() as u64;
+                return Ok(ok(Paginated {
+                    items,
+                    total,
+                    limit: top_k as u64,
+                    offset: p.offset.unwrap_or(0) as u64,
+                }));
             }
-            let items = docs.into_iter().map(map_document).take(top_k).collect::<Vec<_>>();
-            let total = items.len() as u64;
-            return Ok(ok(Paginated {
-                items,
-                total,
-                limit: top_k as u64,
-                offset: p.offset.unwrap_or(0) as u64,
-            }));
+        } else {
+            let mode = p.mode.as_deref().map(DataSearchMode::from_str_lossy).unwrap_or_default();
+            if let Ok(trace) = store.search(&query, mode, top_k) {
+                let mut grouped: std::collections::BTreeMap<String, (f32, Vec<String>)> = std::collections::BTreeMap::new();
+                for candidate in &trace.results {
+                    let entry = grouped.entry(candidate.document_id.clone()).or_insert((candidate.score, Vec::new()));
+                    entry.0 = entry.0.max(candidate.score);
+                    if !entry.1.iter().any(|stage| stage == &candidate.source_stage) {
+                        entry.1.push(candidate.source_stage.clone());
+                    }
+                }
+                let mut items = Vec::new();
+                for (document_id, (score, stages)) in grouped {
+                    if let Ok(Some(doc)) = store.get_document(&document_id) {
+                        let mut doc = map_document(doc);
+                        doc.retrieval_score = Some(score);
+                        doc.source_stages = stages;
+                        items.push(doc);
+                    }
+                }
+                let total = items.len() as u64;
+                return Ok(ok(Paginated {
+                    items,
+                    total,
+                    limit: top_k as u64,
+                    offset: p.offset.unwrap_or(0) as u64,
+                }));
+            }
         }
     }
     let idx = state.chat_engine.index.read().await;
