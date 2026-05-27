@@ -293,6 +293,17 @@ impl ChatEngine {
     fn pick_model(&self, mode: ThinkMode, query: &str) -> ThinkMode {
         match mode {
             ThinkMode::Auto => {
+                let triage = [
+                    "categorize",
+                    "categorise",
+                    "classify",
+                    "rename",
+                    "naming",
+                    "tag",
+                    "duplicate",
+                    "route",
+                    "triage",
+                ];
                 let complex = [
                     "explain",
                     "analyze",
@@ -306,7 +317,10 @@ impl ChatEngine {
                     "reason",
                 ];
                 let q = query.to_lowercase();
-                if query.split_whitespace().count() > 12 || complex.iter().any(|kw| q.contains(kw))
+                if triage.iter().any(|kw| q.contains(kw)) {
+                    ThinkMode::Instruct
+                } else if query.split_whitespace().count() > 12
+                    || complex.iter().any(|kw| q.contains(kw))
                 {
                     ThinkMode::Thinking
                 } else {

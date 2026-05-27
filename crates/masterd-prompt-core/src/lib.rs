@@ -20,6 +20,8 @@ impl PromptRegistry {
     pub fn from_masterd_sources() -> Self {
         let identity_prompt =
             include_str!("../../../models/masterd-identity/masterd_personality_prompt.txt");
+        let triage_prompt =
+            include_str!("../../../models/masterd-identity/lfm2.5_350m_file_triage_prompt.txt");
 
         let identity = AgentProfile {
             key: "masterd".to_string(),
@@ -38,6 +40,15 @@ impl PromptRegistry {
                 prompt: identity.prompt.clone(),
             },
         );
+        avatars.insert(
+            "lfm2.5-350m-triage".to_string(),
+            AgentProfile {
+                key: "lfm2.5-350m-triage".to_string(),
+                display_name: "LFM2.5-350M File Triage".to_string(),
+                one_liner: "Fast file categorization and canonical naming assistant.".to_string(),
+                prompt: triage_prompt.to_string(),
+            },
+        );
 
         Self { identity, avatars }
     }
@@ -52,5 +63,6 @@ mod tests {
         let registry = PromptRegistry::from_masterd_sources();
         assert_eq!(registry.identity.display_name, "MASTERd");
         assert!(registry.identity.prompt.contains("[IDENTITY]"));
+        assert!(registry.avatars.contains_key("lfm2.5-350m-triage"));
     }
 }
