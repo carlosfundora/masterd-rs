@@ -242,10 +242,12 @@ if [[ "${SKIP_CHAT}" == "0" ]]; then
   verify_file "${INSTRUCT_SRC}" 300000000 "LFM2.5-350M-Instruct GGUF"
   verify_file "${INSTRUCT_TOK}" 1000000 "LFM2.5-350M-Instruct tokenizer"
 
-  cp -v "${THINKING_SRC}" "${THINKING_DST_DIR}/model.gguf"
-  cp -v "${THINKING_TOK}" "${THINKING_DST_DIR}/tokenizer.json"
-  cp -v "${INSTRUCT_SRC}" "${INSTRUCT_DST_DIR}/model.gguf"
-  cp -v "${INSTRUCT_TOK}" "${INSTRUCT_DST_DIR}/tokenizer.json"
+  if [[ "${VERIFY_ONLY}" != "1" ]]; then
+    cp -v "${THINKING_SRC}" "${THINKING_DST_DIR}/model.gguf"
+    cp -v "${THINKING_TOK}" "${THINKING_DST_DIR}/tokenizer.json"
+    cp -v "${INSTRUCT_SRC}" "${INSTRUCT_DST_DIR}/model.gguf"
+    cp -v "${INSTRUCT_TOK}" "${INSTRUCT_DST_DIR}/tokenizer.json"
+  fi
 
   verify_file "${THINKING_DST_DIR}/model.gguf" 1000000000 "embedded thinking GGUF"
   verify_file "${THINKING_DST_DIR}/tokenizer.json" 1000000 "embedded thinking tokenizer"

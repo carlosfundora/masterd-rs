@@ -63,7 +63,7 @@ vendor/
 - **Rust** ≥ 1.85 (nightly, see `rust-toolchain.toml`)
 - **Node.js** ≥ 20 + npm
 - **Tauri CLI** — `cargo install tauri-cli`
-- **Git LFS** — required to pull GGUF model weights (`git lfs install`)
+- **curl** or Python `huggingface-hub` — used by `scripts/download-models.sh`
 
 ### Runtime sidecars (downloaded by build script)
 - **Meilisearch** v1.8.3 — lexical search engine
@@ -82,10 +82,13 @@ vendor/
 git clone https://github.com/carlosfundora/masterd-rs
 cd masterd-rs
 
-# 2. Download model weights from Hugging Face
+# 2. Download model weights and tokenizers from Hugging Face
 #    (GGUF files are not stored in git — too large)
+export HF_TOKEN=hf_your_token_here  # required for gated Liquid AI repos
 ./scripts/download-models.sh
-#    For gated models: export HF_TOKEN=hf_your_token_here  before running
+
+# Optional: verify existing local model files without downloading
+./scripts/download-models.sh --verify-only
 
 # 3. Bootstrap: validates sidecar config and creates first-launch directories
 cargo run -p masterd-bootstrap
