@@ -4303,6 +4303,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "masterd-data"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "redis",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "masterd-embed-engine"
 version = "0.1.0"
 dependencies = [

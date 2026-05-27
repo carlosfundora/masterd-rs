@@ -4830,12 +4830,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "masterd-data"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "redis",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "masterd-desktop-tauri"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "masterd-chat-engine",
  "masterd-core",
+ "masterd-data",
  "masterd-index",
  "masterd-pipeline",
  "masterd-runtime-tune",

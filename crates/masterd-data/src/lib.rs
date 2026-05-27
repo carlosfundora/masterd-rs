@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -12,8 +12,10 @@ use sha2::{Digest, Sha256};
 
 pub const DEFAULT_CHUNK_TARGET_TOKENS: usize = 800;
 pub const DEFAULT_CHUNK_OVERLAP_TOKENS: usize = 120;
-const DEFAULT_EMBED_DIM: usize = 384;
-const MATRYOSHKA_DIMS: &[usize] = &[64, 128, 256, 384];
+const DEFAULT_EMBED_DIM: usize = 768;
+const MATRYOSHKA_DIMS: &[usize] = &[64, 128, 256, 384, 768, 1024];
+const RRF_K: f64 = 60.0;
+const GRAPH_EXPANSION_LIMIT: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -233,6 +235,26 @@ pub struct DataStoreConfig {
     pub db_path: PathBuf,
     pub meilisearch_url: Option<String>,
     pub valkey_url: Option<String>,
+    pub embedding_url: Option<String>,
+    pub embedding_model: Option<String>,
+    pub colbert_url: Option<String>,
+    pub lancedb_url: Option<String>,
+    pub falkordb_url: Option<String>,
+}
+
+impl DataStoreConfig {
+    pub fn local(db_path: PathBuf) -> Self {
+        Self {
+            db_path,
+            meilisearch_url: Some("http://127.0.0.1:7700".to_string()),
+            valkey_url: Some("redis://127.0.0.1:6399/".to_string()),
+            embedding_url: Some("http://127.0.0.1:11447".to_string()),
+            embedding_model: Some("jina-omni".to_string()),
+            colbert_url: Some("http://127.0.0.1:11450".to_string()),
+            lancedb_url: None,
+            falkordb_url: Some("redis://127.0.0.1:6380/".to_string()),
+        }
+    }
 }
 
 impl DataStore {
@@ -466,7 +488,7 @@ impl DataStore {
         let extraction = extract_text(path, &bytes, &config.ocr_language);
         timings.push(stage_timing("extract_text", stage_start.elapsed(), if extraction.text.is_some() { "complete" } else { "warning" }));
 
-        let now = now();
+        let timestamp = now();
         let id = stable_id("doc", hash.as_bytes());
         let extension = extension(path);
         let original_name = path.file_name().and_then(|v| v.to_str()).unwrap_or("unknown").to_string();
@@ -494,8 +516,8 @@ impl DataStore {
             confidence,
             duplicate_status: "unique".to_string(),
             processing_status,
-            created_at: now.clone(),
-            updated_at: now,
+            created_at: timestamp.clone(),
+            updated_at: timestamp,
         };
 
         self.upsert_document(&doc)?;
@@ -673,23 +695,24 @@ impl DataStore {
             let start = std::time::Instant::now();
             let mut semantic = self.semantic_search(query, top_k.saturating_mul(4).max(top_k))?;
             stages.push(RetrievalStageTrace {
-                stage: "lancedb_or_sqlite_matryoshka_vector".to_string(),
+                stage: "sqlite_matryoshka_vector".to_string(),
                 count: semantic.len(),
                 elapsed_ms: start.elapsed().as_millis() as u64,
                 degraded: true,
-                message: Some("Using SQLite Matryoshka vector fallback until LanceDB table writer is promoted".to_string()),
+                message: Some("Using SQLite Matryoshka vector fallback".to_string()),
             });
             candidates.append(&mut semantic);
         }
 
-        let merged = rrf_merge_candidates(candidates, top_k);
+        let mut merged = rrf_merge_candidates(candidates, top_k.saturating_mul(2).max(top_k));
+        merged.truncate(top_k);
         let trace = RetrievalTrace {
             id: trace_id,
             query: query.to_string(),
             mode,
             top_k,
             lexical_count: stages.iter().find(|s| s.stage.contains("meilisearch")).map(|s| s.count).unwrap_or(0),
-            semantic_count: stages.iter().find(|s| s.stage.contains("lancedb")).map(|s| s.count).unwrap_or(0),
+            semantic_count: stages.iter().find(|s| s.stage.contains("sqlite_matryoshka")).map(|s| s.count).unwrap_or(0),
             graph_count: 0,
             reranked: false,
             stages,
@@ -793,6 +816,77 @@ impl DataStore {
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    pub fn document_summary(&self) -> Result<(usize, u64)> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let (count, total_bytes): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM documents",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok((count.max(0) as usize, total_bytes.max(0) as u64))
+    }
+
+    pub fn pipeline_summary(&self) -> Result<(usize, usize, usize, usize, usize)> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let (pending, processing, review, complete_today, errors): (i64, i64, i64, i64, i64) = conn.query_row(
+            "
+            SELECT
+                COALESCE(SUM(CASE WHEN status IN ('queued', 'new') THEN 1 ELSE 0 END), 0) AS pending,
+                COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) AS processing,
+                COALESCE((SELECT COUNT(*) FROM review_items WHERE COALESCE(resolved, 0) = 0), 0) AS review,
+                COALESCE(SUM(CASE WHEN status = 'complete' AND substr(created_at, 1, 10) = substr(datetime('now'), 1, 10) THEN 1 ELSE 0 END), 0) AS complete_today,
+                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS errors
+            FROM pipeline_runs
+            ",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        )?;
+        Ok((
+            pending.max(0) as usize,
+            processing.max(0) as usize,
+            review.max(0) as usize,
+            complete_today.max(0) as usize,
+            errors.max(0) as usize,
+        ))
+    }
+
+    pub fn count_review_items(&self) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM review_items WHERE COALESCE(resolved, 0) = 0",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count.max(0) as usize)
+    }
+
+    pub fn update_pipeline_run_status(
+        &self,
+        id: &str,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> Result<Option<PipelineRun>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        conn.execute(
+            "UPDATE pipeline_runs SET status = ?1, failure_json = ?2, updated_at = ?3 WHERE id = ?4",
+            params![
+                status,
+                error_message.map(|message| serde_json::json!({ "stage": "cancel", "message": message }).to_string()),
+                now(),
+                id
+            ],
+        )?;
+        conn.query_row(
+            "SELECT id, document_id, file_path, status, stage_timings_json, failure_json, retryable,
+                    indexed_chunk_count, ocr_confidence, embedding_provider, rerank_status, created_at, updated_at
+             FROM pipeline_runs WHERE id = ?1",
+            params![id],
+            row_to_pipeline_run,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
     pub fn audit_entries_for_document(&self, document_id: &str) -> Result<Vec<AuditEntry>> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
@@ -818,7 +912,13 @@ impl DataStore {
     }
 
     fn lexical_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
-        let escaped = query.replace('"', "\"\"");
+        if let Some(meili) = &self.meili {
+            if let Ok(results) = meili.search_chunks(query, limit) {
+                if !results.is_empty() {
+                    return Ok(results);
+                }
+            }
+        }
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         if query.trim().is_empty() {
             let mut stmt = conn.prepare(
@@ -831,7 +931,10 @@ impl DataStore {
             })?;
             return rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into);
         }
-        let fts_query = escaped.split_whitespace().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(" OR ");
+        let fts_query = fts5_query(query);
+        if fts_query.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut stmt = conn.prepare(
             "SELECT f.chunk_id, f.document_id, f.title, f.path, f.text, bm25(chunks_fts) * -1.0 AS score
              FROM chunks_fts f
@@ -846,9 +949,12 @@ impl DataStore {
     }
 
     fn semantic_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
-        let qvec = hashed_embedding(query, DEFAULT_EMBED_DIM);
+        let live_query_vector = self
+            .embedding
+            .as_ref()
+            .and_then(|client| client.embed_one(query).ok());
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
-            let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(
             "SELECT c.id, c.document_id, d.current_name, d.current_path, c.text, e.vector_json
              FROM embeddings e
              JOIN chunks c ON c.id = e.chunk_id
@@ -859,13 +965,20 @@ impl DataStore {
         while let Some(row) = rows.next()? {
             let vector_json: String = row.get(5)?;
             let vector: Vec<f32> = serde_json::from_str(&vector_json).unwrap_or_default();
+            let fallback_qvec;
+            let qvec = if let Some(live) = live_query_vector.as_ref() {
+                live.as_slice()
+            } else {
+                fallback_qvec = hashed_embedding(query, vector.len().max(DEFAULT_EMBED_DIM));
+                fallback_qvec.as_slice()
+            };
             out.push(RetrievalCandidate {
                 chunk_id: row.get(0)?,
                 document_id: row.get(1)?,
                 title: row.get(2)?,
                 path: row.get(3)?,
                 text: row.get(4)?,
-                score: coarse_to_fine_similarity(&qvec, &vector),
+                score: coarse_to_fine_similarity(qvec, &vector),
                 source_stage: "semantic_matryoshka".to_string(),
             });
         }
@@ -874,14 +987,30 @@ impl DataStore {
         Ok(out)
     }
 
-    fn write_embeddings(&self, chunks: &[DocumentChunk], provider: &str) -> Result<()> {
+    fn write_embeddings(&self, chunks: &[DocumentChunk]) -> Result<String> {
+        let live_embeddings = self
+            .embedding
+            .as_ref()
+            .and_then(|client| {
+                let texts = chunks.iter().map(|chunk| chunk.text.clone()).collect::<Vec<_>>();
+                client.embed_batch(&texts).ok()
+            });
+        let provider = live_embeddings
+            .as_ref()
+            .and_then(|batch| batch.first())
+            .map(|embedding| embedding.provider.clone())
+            .unwrap_or_else(|| "direct-hash".to_string());
         let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let tx = conn.transaction()?;
-        for chunk in chunks {
-            let vector = hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM);
+        for (index, chunk) in chunks.iter().enumerate() {
+            let vector = live_embeddings
+                .as_ref()
+                .and_then(|batch| batch.get(index))
+                .map(|embedding| embedding.vector.clone())
+                .unwrap_or_else(|| hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM));
             let vector_json = serde_json::to_string(&vector)?;
             let vector_hash = sha256_hex(vector_json.as_bytes());
-            let profile = build_matryoshka_profile(provider, chunk, &vector, DEFAULT_EMBED_DIM);
+            let profile = build_matryoshka_profile(&provider, chunk, &vector, vector.len());
             tx.execute(
                 "INSERT OR REPLACE INTO embeddings(
                     chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
@@ -891,7 +1020,7 @@ impl DataStore {
                 params![
                     chunk.id,
                     provider,
-                    DEFAULT_EMBED_DIM as i64,
+                    vector.len() as i64,
                     vector_json,
                     vector_hash,
                     serde_json::to_string(&profile)?,
@@ -903,7 +1032,80 @@ impl DataStore {
             )?;
         }
         tx.commit()?;
+        Ok(provider)
+    }
+
+    fn write_graph_edges_for_document(&self, doc: &DocumentRecord) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        for tag in &doc.tags {
+            if tag.trim().is_empty() {
+                continue;
+            }
+            let target = format!("tag:{tag}");
+            conn.execute(
+                "INSERT OR REPLACE INTO graph_edges(id, from_id, to_id, relation, weight, created_at)
+                 VALUES (?1, ?2, ?3, 'HAS_TAG', ?4, ?5)",
+                params![
+                    stable_id("edge", format!("{}:HAS_TAG:{target}", doc.id).as_bytes()),
+                    doc.id,
+                    target,
+                    0.65f32,
+                    now(),
+                ],
+            )?;
+        }
+        if let Some(classification) = &doc.classification {
+            let target = format!("category:{}", classification.category);
+            conn.execute(
+                "INSERT OR REPLACE INTO graph_edges(id, from_id, to_id, relation, weight, created_at)
+                 VALUES (?1, ?2, ?3, 'CLASSIFIED_AS', ?4, ?5)",
+                params![
+                    stable_id("edge", format!("{}:CLASSIFIED_AS:{target}", doc.id).as_bytes()),
+                    doc.id,
+                    target,
+                    classification.confidence,
+                    now(),
+                ],
+            )?;
+        }
         Ok(())
+    }
+
+    fn mirror_falkordb_document(&self, doc: &DocumentRecord) -> Result<()> {
+        if let Some(falkor) = &self.falkordb {
+            falkor.mirror_document(doc)?;
+        }
+        Ok(())
+    }
+
+    fn graph_expand_candidates(&self, seed_document_ids: &[String], limit: usize) -> Result<Vec<RetrievalCandidate>> {
+        if seed_document_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let mut out = Vec::new();
+        for seed in seed_document_ids.iter().take(GRAPH_EXPANSION_LIMIT) {
+            let mut stmt = conn.prepare(
+                "
+                SELECT c.id, c.document_id, d.current_name, d.current_path, c.text, MAX(e.weight) AS score
+                FROM graph_edges seed_edge
+                JOIN graph_edges e ON e.to_id = seed_edge.to_id AND e.from_id <> seed_edge.from_id
+                JOIN chunks c ON c.document_id = e.from_id
+                JOIN documents d ON d.id = c.document_id
+                WHERE seed_edge.from_id = ?1
+                GROUP BY c.id, c.document_id, d.current_name, d.current_path, c.text
+                ORDER BY score DESC
+                LIMIT ?2
+                ",
+            )?;
+            let rows = stmt.query_map(params![seed, limit as i64], |row| {
+                Ok(candidate_from_row(row, "graph_expansion")?)
+            })?;
+            out.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
+        }
+        out.sort_by(|a, b| b.score.total_cmp(&a.score));
+        out.truncate(limit);
+        Ok(out)
     }
 
     fn upsert_pipeline_run(&self, run: &PipelineRun) -> Result<()> {
@@ -1142,7 +1344,13 @@ fn rrf_merge_candidates(candidates: Vec<RetrievalCandidate>, top_k: usize) -> Ve
     let mut fused: HashMap<String, (f64, RetrievalCandidate)> = HashMap::new();
     for stage_candidates in by_stage.values() {
         for (rank, candidate) in stage_candidates.iter().enumerate() {
-            let score = 1.0 / (60.0 + rank as f64 + 1.0);
+            let weight = match candidate.source_stage.as_str() {
+                "semantic_matryoshka" => 1.10,
+                "lexical" | "meilisearch" => 1.00,
+                "graph_expansion" => 0.72,
+                _ => 1.0,
+            };
+            let score = weight / (RRF_K + rank as f64 + 1.0);
             let entry = fused
                 .entry(candidate.chunk_id.clone())
                 .or_insert_with(|| (0.0, candidate.clone()));
@@ -1155,9 +1363,277 @@ fn rrf_merge_candidates(candidates: Vec<RetrievalCandidate>, top_k: usize) -> Ve
 
     let mut out: Vec<(f64, RetrievalCandidate)> = fused.into_values().collect();
     out.sort_by(|a, b| b.0.total_cmp(&a.0));
-    out.into_iter()
-        .take(top_k)
-        .map(|(score, mut candidate)| {
+    let mut deduper = DocumentDeduper::new();
+    let mut merged = Vec::new();
+    for (score, mut candidate) in out {
+        if deduper.is_duplicate(&candidate.path, &candidate.title, &candidate.text) {
+            continue;
+        }
+        candidate.score = score as f32;
+        candidate.source_stage = "hybrid_rrf".to_string();
+        merged.push(candidate);
+        if merged.len() >= top_k {
+            break;
+        }
+    }
+    merged
+}
+
+#[derive(Debug, Default)]
+struct DocumentDeduper {
+    seen_paths: std::collections::HashSet<String>,
+    seen_titles: std::collections::HashSet<String>,
+    seen_content_hashes: std::collections::HashSet<String>,
+}
+
+impl DocumentDeduper {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn is_duplicate(&mut self, path: &str, title: &str, content: &str) -> bool {
+        let normalized_path = normalize_path_key(path);
+        let normalized_title = normalize_title_key(title);
+        let content_hash = normalized_content_hash(content);
+        let duplicate = (!normalized_path.is_empty() && self.seen_paths.contains(&normalized_path))
+            || (!normalized_title.is_empty() && self.seen_titles.contains(&normalized_title))
+            || (!content_hash.is_empty() && self.seen_content_hashes.contains(&content_hash));
+        if !duplicate {
+            if !normalized_path.is_empty() {
+                self.seen_paths.insert(normalized_path);
+            }
+            if !normalized_title.is_empty() {
+                self.seen_titles.insert(normalized_title);
+            }
+            if !content_hash.is_empty() {
+                self.seen_content_hashes.insert(content_hash);
+            }
+        }
+        duplicate
+    }
+}
+
+fn normalize_path_key(path: &str) -> String {
+    path.trim()
+        .trim_end_matches('/')
+        .trim_start_matches("file://")
+        .to_ascii_lowercase()
+}
+
+fn normalize_title_key(title: &str) -> String {
+    title
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn normalized_content_hash(content: &str) -> String {
+    let normalized = content
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        String::new()
+    } else {
+        sha256_hex(normalized.as_bytes())
+    }
+}
+
+fn fts5_query(raw: &str) -> String {
+    let parsed = parse_query(raw);
+    if parsed.positive_terms.is_empty() && parsed.phrases.is_empty() {
+        return String::new();
+    }
+    let mut parts = Vec::new();
+    for phrase in parsed.phrases {
+        parts.push(format!("\"{}\"", phrase.replace('"', "\"\"")));
+    }
+    for term in parsed.positive_terms {
+        parts.push(format!("\"{}\"", term.replace('"', "\"\"")));
+    }
+    for term in parsed.negative_terms {
+        parts.push(format!("NOT \"{}\"", term.replace('"', "\"\"")));
+    }
+    parts.join(" AND ")
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct ParsedQuery {
+    positive_terms: Vec<String>,
+    negative_terms: Vec<String>,
+    phrases: Vec<String>,
+    filters: HashMap<String, String>,
+}
+
+fn parse_query(raw: &str) -> ParsedQuery {
+    let mut parsed = ParsedQuery::default();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut negated = false;
+
+    for ch in raw.chars().chain(std::iter::once(' ')) {
+        match ch {
+            '"' => {
+                if in_quote {
+                    let value = clean_query_token(&current);
+                    if !value.is_empty() {
+                        if negated {
+                            parsed.negative_terms.push(value);
+                        } else {
+                            parsed.phrases.push(value);
+                        }
+                    }
+                    current.clear();
+                    in_quote = false;
+                    negated = false;
+                } else {
+                    if current.trim() == "-" {
+                        negated = true;
+                        current.clear();
+                    }
+                    in_quote = true;
+                }
+            }
+            '-' if current.is_empty() && !in_quote => {
+                negated = true;
+            }
+            ch if ch.is_whitespace() && !in_quote => {
+                let value = clean_query_token(&current);
+                if let Some((key, val)) = value.split_once(':') {
+                    if !key.is_empty() && !val.is_empty() {
+                        parsed.filters.insert(key.to_string(), val.to_string());
+                    }
+                } else if !value.is_empty() {
+                    if negated {
+                        parsed.negative_terms.push(value);
+                    } else {
+                        parsed.positive_terms.push(value);
+                    }
+                }
+                current.clear();
+                negated = false;
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    parsed.positive_terms.sort();
+    parsed.positive_terms.dedup();
+    parsed.negative_terms.sort();
+    parsed.negative_terms.dedup();
+    parsed.phrases.sort();
+    parsed.phrases.dedup();
+    parsed
+}
+
+fn clean_query_token(token: &str) -> String {
+    token
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '+' | '#' | '.' | '@' | ':'))
+        .collect::<String>()
+        .trim_matches('-')
+        .to_ascii_lowercase()
+}
+
+fn chunk_by_semantic_token_budget(text: &str, target_tokens: usize, overlap_tokens: usize) -> Vec<(String, usize, usize)> {
+    let units = semantic_units(text);
+    if units.is_empty() {
+        return Vec::new();
+    }
+    let target = target_tokens.max(1);
+    let overlap = overlap_tokens.min(target.saturating_sub(1));
+    let mut chunks = Vec::new();
+    let mut current_tokens = Vec::new();
+    let mut start_token = 0usize;
+    let mut cursor = 0usize;
+
+    for unit in units {
+        let tokens = unit.split_whitespace().collect::<Vec<_>>();
+        if tokens.is_empty() {
+            continue;
+        }
+        if !current_tokens.is_empty() && current_tokens.len() + tokens.len() > target {
+            let end_token = cursor;
+            chunks.push((current_tokens.join(" "), start_token, end_token));
+            let keep = overlap.min(current_tokens.len());
+            let retained = current_tokens[current_tokens.len().saturating_sub(keep)..].to_vec();
+            start_token = end_token.saturating_sub(retained.len());
+            current_tokens = retained;
+        }
+        cursor += tokens.len();
+        current_tokens.extend(tokens.into_iter().map(str::to_string));
+    }
+
+    if !current_tokens.is_empty() {
+        chunks.push((current_tokens.join(" "), start_token, cursor));
+    }
+    chunks
+}
+
+fn semantic_units(text: &str) -> Vec<String> {
+    let mut units = Vec::new();
+    for paragraph in text.split("\n\n") {
+        let paragraph = paragraph.trim();
+        if paragraph.is_empty() {
+            continue;
+        }
+        if paragraph.starts_with('#') {
+            units.push(paragraph.to_string());
+            continue;
+        }
+        let mut current = String::new();
+        for ch in paragraph.chars() {
+            current.push(ch);
+            if matches!(ch, '.' | '!' | '?') && current.split_whitespace().count() >= 8 {
+                units.push(current.trim().to_string());
+                current.clear();
+            }
+        }
+        if !current.trim().is_empty() {
+            units.push(current.trim().to_string());
+        }
+    }
+    units
+}
+
+fn mean_pool_token_matrix(token_matrix: &[Vec<f32>]) -> Vec<f32> {
+    if token_matrix.is_empty() {
+        return vec![];
+    }
+    let dim = token_matrix[0].len();
+    let mut mean = vec![0.0f32; dim];
+    let mut count = 0f32;
+    for token in token_matrix {
+        if token.len() != dim {
+            continue;
+        }
+        count += 1.0;
+        for (index, value) in token.iter().enumerate() {
+            mean[index] += *value;
+        }
+    }
+    if count > 0.0 {
+        for value in &mut mean {
+            *value /= count;
+        }
+    }
+    mean
+}
+
+fn token_matrix_hash(token_matrix: &[Vec<f32>]) -> String {
+    let mut bytes = Vec::new();
+    for token in token_matrix {
+        for value in token {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    sha256_hex(&bytes)
+}
             candidate.score = score as f32;
             candidate.source_stage = "hybrid_rrf".to_string();
             candidate

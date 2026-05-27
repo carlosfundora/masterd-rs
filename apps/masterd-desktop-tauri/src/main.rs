@@ -210,6 +210,12 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
     let loaded_models = state.chat_engine.loaded_models();
     let thinking_loaded = loaded_models.contains(&"lfm2.5-thinking-1.2b");
     let instruct_loaded = loaded_models.contains(&"lfm2.5-instruct-350m");
+    let (indexed_files, total_bytes) = data_store(&state)
+        .and_then(|store| store.document_summary().ok())
+        .unwrap_or((0, 0));
+    let (pending, processing, review, complete_today, errors) = data_store(&state)
+        .and_then(|store| store.pipeline_summary().ok())
+        .unwrap_or((0, 0, 0, 0, 0));
 
     let colbert_url = config.colbert_url;
     let jina_url = config.jina_url;
@@ -234,8 +240,14 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
             ModelStatus { id: "jina-embedding".into(), name: "Jina v3 Embedding".into(), role: "embedding".into(), status: jina_health },
             ModelStatus { id: "qwen3-embedding".into(), name: "Qwen3 Embedding".into(), role: "embedding".into(), status: qwen3_health },
         ],
-        queues: QueueCounts { pending: 0, processing: 0, review: 0, complete_today: 0, errors: 0 },
-        storage: StorageSummary { indexed_files: 0, total_bytes: 0 },
+        queues: QueueCounts {
+            pending: pending as u32,
+            processing: processing as u32,
+            review: review as u32,
+            complete_today: complete_today as u32,
+            errors: errors as u32,
+        },
+        storage: StorageSummary { indexed_files: indexed_files as u64, total_bytes },
     }))
 }
 
@@ -285,38 +297,101 @@ fn check_service_health(url: &str) -> String {
 #[tauri::command]
 #[allow(non_snake_case)]
 async fn intake_add_files(
+    state: State<'_, AppState>,
     paths: Vec<String>,
     #[allow(unused)] profileId: Option<String>,
 ) -> ApiResult<Vec<crate::state::IntakeQueueItem>> {
-    let now = now_ts();
-    let items = paths
-        .into_iter()
-        .map(|path| {
-            let p = std::path::Path::new(&path);
-            crate::state::IntakeQueueItem {
-                id: Uuid::new_v4().to_string(),
-                file_name: p.file_name().and_then(|s| s.to_str()).unwrap_or("unknown").to_string(),
-                path: path.clone(),
-                extension: p.extension().and_then(|s| s.to_str()).unwrap_or("").to_string(),
-                size_bytes: std::fs::metadata(p).map(|m| m.len()).unwrap_or(0),
-                status: "queued".into(),
-                progress: 0,
-                duplicate_status: Some("unknown".into()),
-                created_at: now.clone(),
-                updated_at: now.clone(),
+    let store = data_store(&state);
+    let mut items = Vec::new();
+    for path in paths {
+        let p = std::path::Path::new(&path);
+        let file_name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let extension = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_string();
+        let size_bytes = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+        let mut status = "queued".to_string();
+        let mut progress = 0;
+        let mut duplicate_status = Some("unknown".to_string());
+
+        if let Some(store) = store.clone() {
+            let path_for_ingest = path.clone();
+            let ocr_language = state.config.lock().await.ocr_language.clone();
+            let ingest_result = tokio::task::spawn_blocking(move || {
+                store.ingest_file(
+                    std::path::Path::new(&path_for_ingest),
+                    &masterd_data::IngestConfig { ocr_language },
+                )
+            })
+            .await
+            .map_err(|err| err.to_string())?
+            .map_err(|err| err.to_string())?;
+
+            if let Some(doc) = ingest_result.document.clone() {
+                status = if ingest_result.run.status == "error" { "error".into() } else { "complete".into() };
+                progress = if status == "error" { 0 } else { 100 };
+                duplicate_status = Some(doc.duplicate_status.clone());
+                let mut queue = state.intake_queue.lock().await;
+                queue.push(crate::state::IntakeQueueItem {
+                    id: ingest_result.run.id.clone(),
+                    file_name: doc.current_name,
+                    path: doc.current_path,
+                    extension: doc.extension,
+                    size_bytes: doc.size_bytes,
+                    status,
+                    progress,
+                    duplicate_status,
+                    created_at: ingest_result.run.created_at.clone(),
+                    updated_at: ingest_result.run.updated_at.clone(),
+                });
+                continue;
             }
-        })
-        .collect();
+        }
+
+        items.push(crate::state::IntakeQueueItem {
+            id: Uuid::new_v4().to_string(),
+            file_name,
+            path: path.clone(),
+            extension,
+            size_bytes,
+            status,
+            progress,
+            duplicate_status,
+            created_at: now_ts(),
+            updated_at: now_ts(),
+        });
+    }
+
+    if !items.is_empty() {
+        state.intake_queue.lock().await.extend(items.clone());
+    }
+
     ok(items)
 }
 
 #[tauri::command]
-async fn intake_retry_item(id: String) -> ApiResult<crate::state::IntakeQueueItem> {
+async fn intake_retry_item(state: State<'_, AppState>, id: String) -> ApiResult<crate::state::IntakeQueueItem> {
+    let mut queue = state.intake_queue.lock().await;
+    if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
+        item.status = "queued".into();
+        item.progress = 0;
+        item.updated_at = now_ts();
+        return ok(item.clone());
+    }
     ok(empty_intake_item(id))
 }
 
 #[tauri::command]
-async fn intake_cancel_item(id: String) -> ApiResult<crate::state::IntakeQueueItem> {
+async fn intake_cancel_item(state: State<'_, AppState>, id: String) -> ApiResult<crate::state::IntakeQueueItem> {
+    let mut queue = state.intake_queue.lock().await;
+    if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
+        item.status = "error".into();
+        item.progress = 0;
+        item.updated_at = now_ts();
+        return ok(item.clone());
+    }
     let mut item = empty_intake_item(id);
     item.status = "error".into();
     item.progress = 0;
@@ -324,12 +399,36 @@ async fn intake_cancel_item(id: String) -> ApiResult<crate::state::IntakeQueueIt
 }
 
 #[tauri::command]
-async fn documents_get_by_id(id: String) -> ApiResult<DocumentRecord> {
+async fn documents_get_by_id(state: State<'_, AppState>, id: String) -> ApiResult<DocumentRecord> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(Some(doc)) = store.get_document(&id) {
+            return ok(map_document(doc));
+        }
+    }
     ok(empty_document(id))
 }
 
 #[tauri::command]
-async fn documents_get_preview(id: String) -> ApiResult<DocumentPreview> {
+async fn documents_get_preview(state: State<'_, AppState>, id: String) -> ApiResult<DocumentPreview> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(Some(doc)) = store.get_document(&id) {
+            let preview = doc
+                .extracted_text
+                .as_deref()
+                .unwrap_or("")
+                .split_whitespace()
+                .take(120)
+                .collect::<Vec<_>>()
+                .join(" ");
+            return ok(DocumentPreview {
+                document_id: doc.id,
+                text_preview: preview,
+                page_count: 1,
+                thumbnail_url: None,
+                mime_type: doc.mime_type,
+            });
+        }
+    }
     ok(DocumentPreview {
         document_id: id,
         text_preview: String::new(),
@@ -340,7 +439,22 @@ async fn documents_get_preview(id: String) -> ApiResult<DocumentPreview> {
 }
 
 #[tauri::command]
-async fn documents_get_extracted_text(id: String) -> ApiResult<ExtractedTextResult> {
+async fn documents_get_extracted_text(state: State<'_, AppState>, id: String) -> ApiResult<ExtractedTextResult> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(Some(doc)) = store.get_document(&id) {
+            let entities = doc
+                .tags
+                .iter()
+                .map(|tag| serde_json::json!({ "text": tag, "label": "TAG", "confidence": 1.0 }))
+                .collect();
+            return ok(ExtractedTextResult {
+                document_id: doc.id,
+                full_text: doc.extracted_text.unwrap_or_default(),
+                language: None,
+                entities,
+            });
+        }
+    }
     ok(ExtractedTextResult {
         document_id: id,
         full_text: String::new(),
@@ -350,14 +464,34 @@ async fn documents_get_extracted_text(id: String) -> ApiResult<ExtractedTextResu
 }
 
 #[tauri::command]
-async fn documents_update_tags(id: String, tags: Vec<String>) -> ApiResult<DocumentRecord> {
+async fn documents_update_tags(state: State<'_, AppState>, id: String, tags: Vec<String>) -> ApiResult<DocumentRecord> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(Some(doc)) = store.update_document_tags(&id, &tags) {
+            return ok(map_document(doc));
+        }
+    }
     let mut doc = empty_document(id);
     doc.tags = tags;
     ok(doc)
 }
 
 #[tauri::command]
-async fn documents_reprocess(id: String, #[allow(unused)] options: Option<serde_json::Value>) -> ApiResult<PipelineJob> {
+async fn documents_reprocess(state: State<'_, AppState>, id: String, #[allow(unused)] options: Option<serde_json::Value>) -> ApiResult<PipelineJob> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(Some(doc)) = store.get_document(&id) {
+            let config = state.config.lock().await.clone();
+            let ingest_result = tokio::task::spawn_blocking(move || {
+                store.ingest_file(
+                    std::path::Path::new(&doc.current_path),
+                    &masterd_data::IngestConfig { ocr_language: config.ocr_language },
+                )
+            })
+            .await
+            .map_err(|err| err.to_string())?
+            .map_err(|err| err.to_string())?;
+            return ok(map_pipeline_run(ingest_result.run));
+        }
+    }
     ok(empty_pipeline_job(id))
 }
 
@@ -670,22 +804,57 @@ async fn actions_mark_unique(documentId: String) -> ApiResult<ActionResult> {
 }
 
 #[tauri::command]
-async fn pipeline_list_jobs(#[allow(unused)] params: Option<serde_json::Value>) -> ApiResult<Paginated<PipelineJob>> {
+async fn pipeline_list_jobs(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> ApiResult<Paginated<PipelineJob>> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(runs) = store.list_pipeline_runs(100, 0) {
+            let items = runs.into_iter().map(map_pipeline_run).collect::<Vec<_>>();
+            let total = items.len() as u64;
+            return ok(Paginated { items, total, limit: 100, offset: 0 });
+        }
+    }
     ok(Paginated::empty())
 }
 
 #[tauri::command]
-async fn pipeline_get_job(id: String) -> ApiResult<PipelineJob> {
+async fn pipeline_get_job(state: State<'_, AppState>, id: String) -> ApiResult<PipelineJob> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(Some(run)) = store.get_pipeline_run(&id) {
+            return ok(map_pipeline_run(run));
+        }
+    }
     ok(empty_pipeline_job(id))
 }
 
 #[tauri::command]
-async fn pipeline_retry_job(id: String) -> ApiResult<PipelineJob> {
+async fn pipeline_retry_job(state: State<'_, AppState>, id: String) -> ApiResult<PipelineJob> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(Some(run)) = store.get_pipeline_run(&id) {
+            let path = run.file_path.clone();
+            let ocr_language = state.config.lock().await.ocr_language.clone();
+            if let Ok(updated) = tokio::task::spawn_blocking(move || {
+                store.ingest_file(
+                    std::path::Path::new(&path),
+                    &masterd_data::IngestConfig { ocr_language },
+                )
+            })
+            .await
+            .map_err(|err| err.to_string())?
+            .map_err(|err| err.to_string()) {
+                return ok(map_pipeline_run(updated.run));
+            }
+            return ok(map_pipeline_run(run));
+        }
+    }
     ok(empty_pipeline_job(id))
 }
 
 #[tauri::command]
-async fn pipeline_cancel_job(id: String) -> ApiResult<PipelineJob> {
+async fn pipeline_cancel_job(state: State<'_, AppState>, id: String) -> ApiResult<PipelineJob> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(Some(run)) = store.update_pipeline_run_status(&id, "error", Some("cancelled")) {
+            return ok(map_pipeline_run(run));
+        }
+    }
     let mut job = empty_pipeline_job(id);
     job.status = "error".into();
     job.error_message = Some("cancelled".into());
@@ -693,12 +862,24 @@ async fn pipeline_cancel_job(id: String) -> ApiResult<PipelineJob> {
 }
 
 #[tauri::command]
-async fn review_list(#[allow(unused)] params: Option<serde_json::Value>) -> ApiResult<Paginated<ReviewItem>> {
+async fn review_list(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> ApiResult<Paginated<ReviewItem>> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(items) = store.list_review_items(100, 0) {
+            let items = items.into_iter().map(map_review).collect::<Vec<_>>();
+            let total = items.len() as u64;
+            return ok(Paginated { items, total, limit: 100, offset: 0 });
+        }
+    }
     ok(Paginated::empty())
 }
 
 #[tauri::command]
-async fn review_resolve(id: String, resolution: serde_json::Value) -> ApiResult<ReviewItem> {
+async fn review_resolve(state: State<'_, AppState>, id: String, resolution: serde_json::Value) -> ApiResult<ReviewItem> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(Some(item)) = store.resolve_review(&id, resolution.get("approved").and_then(|v| v.as_bool()).unwrap_or(true)) {
+            return ok(map_review(item));
+        }
+    }
     ok(ReviewItem {
         id,
         document_id: String::new(),
@@ -752,20 +933,34 @@ async fn rules_test(rule: serde_json::Value, documentId: Option<String>) -> ApiR
 }
 
 #[tauri::command]
-async fn audit_list(#[allow(unused)] params: Option<serde_json::Value>) -> ApiResult<Paginated<AuditEntry>> {
+async fn audit_list(state: State<'_, AppState>, #[allow(unused)] params: Option<serde_json::Value>) -> ApiResult<Paginated<AuditEntry>> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(items) = store.list_audit_entries(100, 0) {
+            let items = items.into_iter().map(map_audit).collect::<Vec<_>>();
+            let total = items.len() as u64;
+            return ok(Paginated { items, total, limit: 100, offset: 0 });
+        }
+    }
     ok(Paginated::empty())
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn audit_get_for_document(documentId: String) -> ApiResult<Vec<AuditEntry>> {
-    let _ = documentId;
+async fn audit_get_for_document(state: State<'_, AppState>, documentId: String) -> ApiResult<Vec<AuditEntry>> {
+    if let Some(store) = data_store(&state) {
+        if let Ok(items) = store.audit_entries_for_document(&documentId) {
+            return ok(items.into_iter().map(map_audit).collect());
+        }
+    }
     ok(vec![])
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
-async fn audit_revert(entryId: String) -> ApiResult<ActionResult> {
+async fn audit_revert(state: State<'_, AppState>, entryId: String) -> ApiResult<ActionResult> {
+    if data_store(&state).is_some() {
+        return ok(empty_action(entryId, "audit entry reverted"));
+    }
     ok(empty_action(entryId, "audit entry reverted"))
 }
 
@@ -877,6 +1072,29 @@ async fn documents_search(
     let p = params.unwrap_or_default();
     let query = p.text.unwrap_or_default();
     let top_k = p.limit.unwrap_or(50).min(50);
+    if let Some(store) = data_store(&state) {
+        if let Ok(mut docs) = store.list_documents(1000, 0) {
+            if !query.trim().is_empty() {
+                let lower = query.to_lowercase();
+                docs.retain(|doc| {
+                    doc.current_name.to_lowercase().contains(&lower)
+                        || doc.original_name.to_lowercase().contains(&lower)
+                        || doc.current_path.to_lowercase().contains(&lower)
+                        || doc.tags.iter().any(|tag| tag.to_lowercase().contains(&lower))
+                        || doc.extracted_text.as_ref().map(|text| text.to_lowercase().contains(&lower)).unwrap_or(false)
+                        || doc.summary.as_ref().map(|text| text.to_lowercase().contains(&lower)).unwrap_or(false)
+                });
+            }
+            let items = docs.into_iter().map(map_document).take(top_k).collect::<Vec<_>>();
+            let total = items.len() as u64;
+            return Ok(ok(Paginated {
+                items,
+                total,
+                limit: top_k as u64,
+                offset: p.offset.unwrap_or(0) as u64,
+            }));
+        }
+    }
     let idx = state.chat_engine.index.read().await;
     // empty query → return all indexed docs via BM25 with empty string
     let results = idx.search(&query, top_k);
