@@ -604,37 +604,39 @@ fn map_document(doc: masterd_data::DocumentRecord) -> DocumentRecord {
 
 fn map_pipeline_run(run: masterd_data::PipelineRun) -> PipelineJob {
     let run_id = run.id.clone();
+    let updated_at = run.updated_at.clone();
+    let stage_timings = run.stage_timings;
+    let failed_stage = run.failure.as_ref().map(|failure| failure.stage.clone());
+    let stage_name = failed_stage
+        .or_else(|| stage_timings.last().map(|stage| stage.stage.clone()))
+        .unwrap_or_else(|| "complete".to_string());
     let file_name = std::path::Path::new(&run.file_path)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(&run.file_path)
         .to_string();
-    let failed_stage = run.failure.as_ref().map(|failure| failure.stage.clone());
     PipelineJob {
         id: run.id,
         document_id: run.document_id.unwrap_or_default(),
         file_name,
-        stage: failed_stage
-            .or_else(|| run.stage_timings.last().map(|stage| stage.stage.clone()))
-            .unwrap_or_else(|| "complete".to_string()),
+        stage: stage_name,
         status: run.status.clone(),
         progress: if run.status == "complete" || run.status == "duplicate" { 100 } else { 0 },
         started_at: Some(run.created_at.clone()),
         finished_at: Some(run.updated_at.clone()),
         error_message: run.failure.as_ref().map(|failure| failure.message.clone()),
         worker_id: Some("local-data-store".into()),
-        logs: run
-            .stage_timings
+        logs: stage_timings
             .iter()
             .map(|stage| json!({
                 "id": format!("{}:{}", run_id, stage.stage),
                 "level": if stage.status == "complete" { "info" } else { "warning" },
                 "message": format!("{} {}", stage.stage, stage.status),
-                "createdAt": run.updated_at,
+                "createdAt": updated_at,
                 "details": { "elapsedMs": stage.elapsed_ms }
             }))
             .collect(),
-        stage_timings: run.stage_timings,
+        stage_timings,
         retryable: run.retryable,
         indexed_chunk_count: run.indexed_chunk_count,
         ocr_confidence: run.ocr_confidence,
@@ -1039,6 +1041,124 @@ async fn preferences_dismiss(state: State<'_, AppState>, id: String) -> Result<A
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct PreferenceDraftRequest {
+    pub document_id: Option<String>,
+    pub goal: Option<String>,
+    pub max_tokens: Option<usize>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferenceDraft {
+    pub model: String,
+    pub prompt_version: String,
+    pub status: String,
+    pub raw_text: String,
+    pub parsed: Option<serde_json::Value>,
+    pub provenance: serde_json::Value,
+}
+
+#[tauri::command]
+async fn preferences_draft_policy(
+    state: State<'_, AppState>,
+    request: PreferenceDraftRequest,
+) -> Result<ApiResult<PreferenceDraft>, String> {
+    let Some(store) = data_store(&state) else {
+        return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
+    };
+    let preferences = store.list_preferences().map_err(|err| err.to_string())?;
+    let document = if let Some(id) = request.document_id.as_deref() {
+        store.get_document(id).map_err(|err| err.to_string())?
+    } else {
+        None
+    };
+    let preference_sample = preferences
+        .iter()
+        .take(24)
+        .map(|preference| {
+            json!({
+                "id": preference.id,
+                "category": preference.category,
+                "key": preference.key,
+                "value": preference.value,
+                "confidence": preference.confidence,
+                "status": preference.status,
+                "evidenceCount": preference.evidence_count,
+            })
+        })
+        .collect::<Vec<_>>();
+    let document_json = document.as_ref().map(|doc| {
+        json!({
+            "id": doc.id,
+            "currentName": doc.current_name,
+            "suggestedName": doc.suggested_name,
+            "path": doc.current_path,
+            "extension": doc.extension,
+            "classification": doc.classification,
+            "tags": doc.tags,
+            "summary": doc.summary,
+            "confidence": doc.confidence,
+        })
+    });
+    let goal = request.goal.unwrap_or_else(|| {
+        "Draft review-gated learned preferences for naming, tagging, classification, routing, or retrieval behavior.".to_string()
+    });
+    let evidence = json!({
+        "goal": goal,
+        "learnedPreferences": preference_sample,
+        "document": document_json,
+        "constraints": [
+            "Return JSON only.",
+            "Do not approve or apply automation.",
+            "Every suggestion must cite evidence ids or document id.",
+            "Prefer deterministic rules over broad behavioral claims.",
+            "Use status pending_review for suggestions that require user approval."
+        ]
+    });
+    let system_prompt = r#"You are MASTERd's local LFM2.5-350M preference drafting model.
+Draft auditable user preference suggestions from evidence. You do not execute actions.
+Return one JSON object with:
+{
+  "suggestions": [
+    {
+      "category": "naming|tagging|classification|routing|retrieval|chat",
+      "key": "short stable key",
+      "value": "proposed behavior",
+      "confidence": 0.0,
+      "status": "pending_review",
+      "evidenceIds": [],
+      "reason": "short reason"
+    }
+  ],
+  "risks": [],
+  "requiresReview": true
+}"#
+    .to_string();
+    let user_prompt = serde_json::to_string_pretty(&evidence).map_err(|err| err.to_string())?;
+    let raw_text = state
+        .chat_engine
+        .clone()
+        .generate_instruct_text(system_prompt, user_prompt, request.max_tokens.unwrap_or(384).min(1024))
+        .await
+        .map_err(|err| err.to_string())?;
+    let parsed = parse_first_json_object(&raw_text);
+    Ok(ok(PreferenceDraft {
+        model: "lfm2.5-instruct-350m".to_string(),
+        prompt_version: "preference-draft-v1".to_string(),
+        status: "draft_pending_review".to_string(),
+        raw_text,
+        parsed,
+        provenance: json!({
+            "documentId": request.document_id,
+            "preferenceCount": preferences.len(),
+            "createdAt": now_ts(),
+            "reviewGated": true
+        }),
+    }))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct RetrievalExplainRequest {
     pub trace_id: Option<String>,
     pub query: Option<String>,
@@ -1110,6 +1230,15 @@ fn rule_from_value(id: String, value: serde_json::Value) -> AutomationRule {
         rule.safety_level = safety_level.to_string();
     }
     rule
+}
+
+fn parse_first_json_object(raw: &str) -> Option<serde_json::Value> {
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+    if end < start {
+        return None;
+    }
+    serde_json::from_str(&raw[start..=end]).ok()
 }
 
 // ── Settings commands ─────────────────────────────────────────────────────────
@@ -1456,6 +1585,7 @@ fn main() {
             rules_list, rules_get_by_id, rules_create, rules_update, rules_delete, rules_test,
             audit_list, audit_get_for_document, audit_revert,
             preferences_list, preferences_record_event, preferences_approve, preferences_dismiss,
+            preferences_draft_policy,
             retrieval_explain,
             chat_send_message,
         ])

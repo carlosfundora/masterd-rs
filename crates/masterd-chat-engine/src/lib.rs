@@ -428,6 +428,30 @@ impl ChatEngine {
             )
             .await
     }
+
+    /// Generate a short non-streaming JSON/text draft with the embedded
+    /// LFM2.5-350M instruct model. This is intended for review-gated policy
+    /// drafting and never applies learned preferences by itself.
+    pub async fn generate_instruct_text(
+        self: Arc<Self>,
+        system_prompt: String,
+        user_prompt: String,
+        max_new_tokens: usize,
+    ) -> Result<String> {
+        let mut session = ChatSession::new();
+        session.push(Role::User, user_prompt);
+        let prompt = session.to_chatml(&system_prompt);
+        let engine = self.clone();
+        let mut cfg = self.config.clone();
+        cfg.max_new_tokens = max_new_tokens.max(1);
+        tokio::task::spawn_blocking(move || {
+            engine.ensure_instruct()?;
+            let mut g = engine.instruct.lock().unwrap();
+            generate_text(g.as_mut().unwrap(), &prompt, &cfg)
+        })
+        .await
+        .context("instruct draft generation thread panicked")?
+    }
 }
 
 // ── Generation loop ─────────────────────────────────────────────────────────
@@ -518,6 +542,63 @@ fn generate(
         citations,
     });
     Ok(())
+}
+
+fn generate_text(
+    model: &mut LoadedModel,
+    prompt: &str,
+    config: &ChatEngineConfig,
+) -> Result<String> {
+    let ids: Vec<u32> = model
+        .tokenizer
+        .encode(prompt, true)
+        .map_err(|e| anyhow::anyhow!("encode: {e}"))?
+        .get_ids()
+        .to_vec();
+
+    let input = candle_core::Tensor::new(ids.as_slice(), &model.device)?.unsqueeze(0)?;
+    let mut logits_proc = LogitsProcessor::from_sampling(
+        42,
+        Sampling::TopK {
+            k: config.top_k,
+            temperature: config.temperature,
+        },
+    );
+
+    let mut all_tokens = ids.clone();
+    let logits = model.weights.forward(&input, 0)?;
+    let logits = logits.squeeze(0)?.squeeze(0)?;
+    let logits = repeat_penalty(
+        &logits,
+        &all_tokens,
+        config.repeat_penalty,
+        config.repeat_last_n,
+    )?;
+    let mut next = logits_proc.sample(&logits)?;
+    all_tokens.push(next);
+
+    let mut out = String::new();
+    for _ in 0..config.max_new_tokens {
+        if next == model.eos_token_id {
+            break;
+        }
+        let step_input = candle_core::Tensor::new(&[next], &model.device)?.unsqueeze(0)?;
+        let logits = model.weights.forward(&step_input, all_tokens.len() - 1)?;
+        let logits = logits.squeeze(0)?.squeeze(0)?;
+        let logits = repeat_penalty(
+            &logits,
+            &all_tokens,
+            config.repeat_penalty,
+            config.repeat_last_n,
+        )?;
+        next = logits_proc.sample(&logits)?;
+        all_tokens.push(next);
+
+        if let Some(text) = decode_one(&model.tokenizer, next) {
+            out.push_str(&text);
+        }
+    }
+    Ok(out)
 }
 
 fn decode_one(tok: &Tokenizer, id: u32) -> Option<String> {

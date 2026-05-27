@@ -512,14 +512,21 @@ impl DataStore {
         let id = stable_id("doc", hash.as_bytes());
         let extension = extension(path);
         let original_name = path.file_name().and_then(|v| v.to_str()).unwrap_or("unknown").to_string();
-        let tags = infer_tags(&extension, extraction.text.as_deref().unwrap_or_default());
+        let routing = routing_decision_for(path, &hash);
+        let mut tags = infer_tags(&extension, extraction.text.as_deref().unwrap_or_default());
+        if let Some(decision) = &routing {
+            tags.extend(decision.tags.iter().cloned());
+            tags.push(format!("route:{}", decision.route));
+            tags.sort();
+            tags.dedup();
+        }
         let confidence = if extraction.text.is_some() { 0.82 } else { 0.20 };
         let processing_status = if extraction.text.is_some() { "complete" } else { "warning" }.to_string();
         let doc = DocumentRecord {
             id: id.clone(),
             original_name: original_name.clone(),
             current_name: original_name,
-            suggested_name: None,
+            suggested_name: routing.as_ref().map(|decision| decision.canonical_name.clone()),
             original_path: path_string.clone(),
             current_path: path_string.clone(),
             extension: extension.clone(),
@@ -805,7 +812,7 @@ impl DataStore {
             params![event.id, event.category, event.signal, event.value, event.source, event.confidence, event.created_at],
         )?;
         drop(conn);
-        self.promote_preference(&event.category, &event.signal, &event.value)
+        self.promote_preference(&event.category, &preference_key(&event.signal), &event.value)
     }
 
     pub fn list_preferences(&self) -> Result<Vec<LearnedPreference>> {
@@ -1284,13 +1291,49 @@ impl DataStore {
 
     fn promote_preference(&self, category: &str, signal: &str, value: &str) -> Result<LearnedPreference> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
-        let (count, avg): (i64, f64) = conn.query_row(
-            "SELECT COUNT(*), AVG(confidence) FROM preference_events WHERE category = ?1 AND signal = ?2 AND value = ?3",
-            params![category, signal, value],
-            |row| Ok((row.get(0)?, row.get::<_, Option<f64>>(1)?.unwrap_or(0.0))),
+        let mut stmt = conn.prepare(
+            "SELECT signal, confidence, created_at FROM preference_events WHERE category = ?1 AND value = ?2",
         )?;
-        let confidence = ((count as f32 / 5.0).min(1.0) * 0.4) + ((avg as f32).clamp(0.0, 1.0) * 0.6);
-        let status = if confidence >= 0.80 && count >= 3 { "pending_review" } else { "learning" };
+        let mut rows = stmt.query(params![category, value])?;
+        let mut count = 0i64;
+        let mut positive_events = 0i64;
+        let mut support = 0.0f32;
+        let mut opposition = 0.0f32;
+        let mut weighted_positive_confidence = 0.0f32;
+        let mut positive_weight = 0.0f32;
+        while let Some(row) = rows.next()? {
+            let raw_signal: String = row.get(0)?;
+            if preference_key(&raw_signal) != signal {
+                continue;
+            }
+            let event_confidence = row.get::<_, f32>(1)?.clamp(0.0, 1.0);
+            let created_at: String = row.get(2)?;
+            let decay = recency_decay(&created_at, 45.0);
+            count += 1;
+            if preference_signal_is_negative(&raw_signal) {
+                opposition += event_confidence * decay;
+            } else {
+                positive_events += 1;
+                support += event_confidence * decay;
+                weighted_positive_confidence += event_confidence * decay;
+                positive_weight += decay;
+            }
+        }
+        let total = support + opposition;
+        let agreement = if total > 0.0 { support / total } else { 0.0 };
+        let avg_positive = if positive_weight > 0.0 {
+            weighted_positive_confidence / positive_weight
+        } else {
+            0.0
+        };
+        let volume = (count as f32 / 5.0).min(1.0);
+        let confidence = ((agreement * 0.65) + (avg_positive * 0.25) + (volume * 0.10)).clamp(0.0, 1.0);
+        let opposition_ratio = if total > 0.0 { opposition / total } else { 0.0 };
+        let status = if confidence >= 0.80 && positive_events >= 3 && opposition_ratio < 0.35 {
+            "pending_review"
+        } else {
+            "learning"
+        };
         let id = stable_id("pref", format!("{category}:{signal}:{value}").as_bytes());
         let created_at = now();
         conn.execute(
@@ -1622,6 +1665,46 @@ fn clean_query_token(token: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_ascii_lowercase()
+}
+
+fn preference_key(signal: &str) -> String {
+    let lower = signal.trim().to_ascii_lowercase();
+    for prefix in [
+        "accepted_",
+        "accept_",
+        "approved_",
+        "approve_",
+        "selected_",
+        "select_",
+        "rejected_",
+        "reject_",
+        "dismissed_",
+        "dismiss_",
+        "corrected_",
+        "correction_",
+        "undo_",
+    ] {
+        if let Some(rest) = lower.strip_prefix(prefix) {
+            return rest.to_string();
+        }
+    }
+    lower
+}
+
+fn preference_signal_is_negative(signal: &str) -> bool {
+    let lower = signal.trim().to_ascii_lowercase();
+    ["rejected_", "reject_", "dismissed_", "dismiss_", "corrected_", "correction_", "undo_"]
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+}
+
+fn recency_decay(created_at: &str, half_life_days: f32) -> f32 {
+    let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(created_at) else {
+        return 1.0;
+    };
+    let age_seconds = (Utc::now() - timestamp.with_timezone(&Utc)).num_seconds().max(0) as f32;
+    let age_days = age_seconds / 86_400.0;
+    0.5f32.powf(age_days / half_life_days.max(1.0))
 }
 
 fn chunk_by_semantic_token_budget(text: &str, target_tokens: usize, overlap_tokens: usize) -> Vec<(String, usize, usize)> {
@@ -2455,6 +2538,35 @@ fn mime_type_for(ext: &str) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone)]
+struct LocalRoutingDecision {
+    route: String,
+    canonical_name: String,
+    tags: Vec<String>,
+}
+
+fn routing_decision_for(path: &Path, content_hash: &str) -> Option<LocalRoutingDecision> {
+    let ext = extension(path);
+    let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or("file");
+    let ext_with_dot = if ext.is_empty() { String::new() } else { format!(".{ext}") };
+    let hash8 = &content_hash[..content_hash.len().min(8)];
+    let (route, tags): (&str, &[&str]) = match ext.as_str() {
+        "pdf" => ("documents/pdf", &["pdf", "document"]),
+        "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tiff" => ("media/images", &["image", "media"]),
+        "txt" | "md" | "rst" | "rtf" => ("documents/text", &["text", "document"]),
+        "rs" | "py" | "js" | "ts" | "go" | "java" | "c" | "cpp" | "h" | "hpp" => ("code", &["code"]),
+        "xlsx" | "xls" | "csv" | "ods" => ("documents/spreadsheets", &["spreadsheet", "data"]),
+        "zip" | "tar" | "gz" | "bz2" | "7z" | "rar" => ("archives", &["archive"]),
+        "" => return None,
+        _ => ("uncategorized", &["uncategorized"]),
+    };
+    Some(LocalRoutingDecision {
+        route: route.to_string(),
+        canonical_name: format!("{stem}_{hash8}{ext_with_dot}"),
+        tags: tags.iter().map(|tag| tag.to_string()).collect(),
+    })
+}
+
 fn classify_text(text: &str, ext: &str) -> String {
     let lower = text.to_ascii_lowercase();
     if ext == "pdf" && lower.contains("invoice") {
@@ -2565,6 +2677,43 @@ mod tests {
             }).unwrap());
         }
         assert_eq!(last.unwrap().status, "pending_review");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejected_evidence_suppresses_preference_promotion() {
+        let path = std::env::temp_dir().join(format!("masterd-pref-neg-test-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut config = DataStoreConfig::local(path.clone());
+        config.meilisearch_url = None;
+        config.valkey_url = None;
+        config.embedding_url = None;
+        config.colbert_url = None;
+        config.lancedb_url = None;
+        config.falkordb_url = None;
+        let store = DataStore::open(config).unwrap();
+        for i in 0..3 {
+            let _ = store.store_preference_event(PreferenceEvent {
+                id: format!("accept-{i}"),
+                category: "naming".into(),
+                signal: "accepted_prefix".into(),
+                value: "date".into(),
+                source: "test".into(),
+                confidence: 0.95,
+                created_at: now(),
+            }).unwrap();
+        }
+        let learned = store.store_preference_event(PreferenceEvent {
+            id: "reject-1".into(),
+            category: "naming".into(),
+            signal: "rejected_prefix".into(),
+            value: "date".into(),
+            source: "test".into(),
+            confidence: 0.95,
+            created_at: now(),
+        }).unwrap();
+        assert_eq!(learned.status, "learning");
+        assert!(learned.confidence < 0.80);
         let _ = std::fs::remove_file(path);
     }
 
