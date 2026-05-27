@@ -8,10 +8,13 @@
 //! Binaries are expected at:
 //!   <resource_dir>/bin/meilisearch
 //!   <resource_dir>/bin/valkey-server
+//!   <resource_dir>/bin/falkordb-server
+//!   <resource_dir>/modules/falkordb.so
 //!
 //! Data directories are provisioned inside the app's data_dir:
 //!   <data_dir>/meilisearch/
 //!   <data_dir>/valkey/
+//!   <data_dir>/falkordb/
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -52,6 +55,7 @@ impl SidecarSupervisor {
     pub fn start_all(&self, resource_dir: &Path, data_dir: &Path) {
         self.start_meilisearch(resource_dir, data_dir);
         self.start_valkey(resource_dir, data_dir);
+        self.start_falkordb(resource_dir, data_dir);
     }
 
     fn start_meilisearch(&self, resource_dir: &Path, data_dir: &Path) {
@@ -90,24 +94,49 @@ impl SidecarSupervisor {
             return;
         }
 
-        // Check for FalkorDB module.
-        let module_path = resource_dir.join("modules").join("falkordb.so");
-        let module_path = module_path.canonicalize().unwrap_or(module_path);
-        let mut args: Vec<String> = vec![
+        let args: Vec<String> = vec![
             "--port".into(), "6399".into(),
             "--dir".into(), db_path.to_string_lossy().into_owned(),
             "--save".into(), "60 1".into(),
         ];
-        if module_path.exists() {
-            args.push("--loadmodule".into());
-            args.push(module_path.to_string_lossy().into_owned());
-            info!("FalkorDB module found — loading into Valkey");
-        }
 
         let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         match self.spawn("valkey-server", &bin, &arg_refs) {
             Ok(()) => info!("valkey-server started on 127.0.0.1:6399"),
             Err(e) => warn!("failed to start valkey-server: {e}"),
+        }
+    }
+
+    fn start_falkordb(&self, resource_dir: &Path, data_dir: &Path) {
+        let bin = resource_dir.join("bin").join("falkordb-server");
+        if !bin.exists() {
+            info!("falkordb-server binary not found at {}, skipping", bin.display());
+            return;
+        }
+
+        let module_path = resource_dir.join("modules").join("falkordb.so");
+        let module_path = module_path.canonicalize().unwrap_or(module_path);
+        if !module_path.exists() {
+            warn!("falkordb module not found at {}, skipping graph DB", module_path.display());
+            return;
+        }
+
+        let db_path = data_dir.join("falkordb");
+        if let Err(e) = std::fs::create_dir_all(&db_path) {
+            warn!("could not create falkordb data dir: {e}");
+            return;
+        }
+
+        let args: Vec<String> = vec![
+            "--port".into(), "6380".into(),
+            "--dir".into(), db_path.to_string_lossy().into_owned(),
+            "--save".into(), "60 1".into(),
+            "--loadmodule".into(), module_path.to_string_lossy().into_owned(),
+        ];
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        match self.spawn("falkordb-server", &bin, &arg_refs) {
+            Ok(()) => info!("falkordb-server started on 127.0.0.1:6380"),
+            Err(e) => warn!("failed to start falkordb-server: {e}"),
         }
     }
 

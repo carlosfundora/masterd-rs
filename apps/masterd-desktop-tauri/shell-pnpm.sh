@@ -9,7 +9,7 @@ if ! command -v pnpm >/dev/null 2>&1; then
   exit 127
 fi
 
-if [[ ! -d "${SHELL_DIR}/node_modules" ]]; then
+if [[ ! -x "${SHELL_DIR}/node_modules/.bin/next" ]]; then
   if [[ -f "${SHELL_DIR}/pnpm-lock.yaml" ]]; then
     pnpm --dir "${SHELL_DIR}" install --frozen-lockfile
   else

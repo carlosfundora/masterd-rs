@@ -202,6 +202,7 @@ fi
 # distribution channel for the Redis-compatible FalkorDB module.
 FALKOR_BIN_VERSION="1.4.1"
 FALKOR_SO="${MOD_DIR}/falkordb.so"
+FALKOR_SERVER="${BIN_DIR}/falkordb-server"
 install_falkor_from_wheel() {
   local wheel_dir="${ROOT_DIR}/target/falkordb-bin"
   local metadata_json="${wheel_dir}/falkordb-bin-${FALKOR_BIN_VERSION}.json"
@@ -236,28 +237,34 @@ PY
 
   printf "%b║%b  Downloading FalkorDB binary wheel %s for %s...%b\n" "${RED}" "${CYAN}" "${FALKOR_BIN_VERSION}" "${FALKOR_WHEEL_PLATFORM}" "${RESET}"
   curl -fsSL "${wheel_url}" -o "${wheel_file}"
-  FALKOR_WHEEL="${wheel_file}" FALKOR_SO="${FALKOR_SO}" python3 - <<'PY'
+  FALKOR_WHEEL="${wheel_file}" FALKOR_SO="${FALKOR_SO}" FALKOR_SERVER="${FALKOR_SERVER}" python3 - <<'PY'
 import os
 import stat
 import zipfile
 
 wheel = os.environ["FALKOR_WHEEL"]
 module_dest = os.environ["FALKOR_SO"]
+server_dest = os.environ["FALKOR_SERVER"]
 with zipfile.ZipFile(wheel) as zf:
     module_name = next(name for name in zf.namelist() if name.endswith("/falkordb.so"))
     with zf.open(module_name) as src, open(module_dest, "wb") as dst:
         dst.write(src.read())
+    server_name = next(name for name in zf.namelist() if name.endswith("/redis-server"))
+    with zf.open(server_name) as src, open(server_dest, "wb") as dst:
+        dst.write(src.read())
 mode = os.stat(module_dest).st_mode
 os.chmod(module_dest, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+mode = os.stat(server_dest).st_mode
+os.chmod(server_dest, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 PY
 }
 
-if [[ ! -f "${FALKOR_SO}" ]]; then
-  printf "%b║%b  Installing FalkorDB module for embedded graph support...%b\n" "${RED}" "${CYAN}" "${RESET}"
+if [[ ! -f "${FALKOR_SO}" || ! -f "${FALKOR_SERVER}" ]]; then
+  printf "%b║%b  Installing FalkorDB graph DB...%b\n" "${RED}" "${CYAN}" "${RESET}"
   install_falkor_from_wheel
-  printf "%b║%b  FalkorDB module installed for Valkey loadmodule.%b\n" "${RED}" "${GREEN}" "${RESET}"
+  printf "%b║%b  FalkorDB graph DB installed.%b\n" "${RED}" "${GREEN}" "${RESET}"
 else
-  printf "%b║%b  FalkorDB module already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
+  printf "%b║%b  FalkorDB graph DB already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
 fi
 
 # ── Frontend build ─────────────────────────────────────────────────────────
