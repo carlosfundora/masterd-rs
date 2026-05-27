@@ -86,7 +86,7 @@ cd masterd-rs
 #    (GGUF files are not stored in git — too large)
 export HF_TOKEN=hf_your_token_here  # required for gated Liquid AI repos
 
-# Optional: pre-download model weights and tokenizers now
+# Optional: pre-download model weights, tokenizers, and chat templates now
 ./scripts/download-models.sh
 
 # Optional: verify existing local model files without downloading
@@ -331,7 +331,7 @@ cd /home/local/ai/projects/MASTERd
 
 Installer sequence:
 1. Launch boot MIDI unless `MASTERD_NO_MUSIC=1`.
-2. Run `scripts/download-models.sh` unless `MASTERD_SKIP_MODEL_DOWNLOAD=1`.
+2. Run `scripts/download-models.sh` to install model weights, tokenizers, and chat templates unless `MASTERD_SKIP_MODEL_DOWNLOAD=1`.
 3. Run `scripts/setup-embedding-services.sh all` unless `MASTERD_SKIP_EMBEDDING_SERVICES=1`.
 4. Download/build sidecars, build the Next shell, and package Tauri.
 
