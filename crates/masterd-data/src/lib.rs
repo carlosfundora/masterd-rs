@@ -228,6 +228,10 @@ pub struct DataStore {
     conn: Arc<Mutex<Connection>>,
     meili: Option<MeilisearchClient>,
     valkey: Option<redis::Client>,
+    embedding: Option<EmbeddingServiceClient>,
+    reranker: Option<ColbertRerankerClient>,
+    lancedb: Option<LanceDbClient>,
+    falkordb: Option<FalkorDbClient>,
 }
 
 #[derive(Debug, Clone)]
@@ -273,6 +277,22 @@ impl DataStore {
             valkey: config
                 .valkey_url
                 .and_then(|url| redis::Client::open(url).ok()),
+            embedding: config
+                .embedding_url
+                .filter(|url| !url.trim().is_empty())
+                .map(|url| EmbeddingServiceClient::new(url, config.embedding_model.unwrap_or_else(|| "jina-omni".to_string()))),
+            reranker: config
+                .colbert_url
+                .filter(|url| !url.trim().is_empty())
+                .map(ColbertRerankerClient::new),
+            lancedb: config
+                .lancedb_url
+                .filter(|url| !url.trim().is_empty())
+                .map(LanceDbClient::new),
+            falkordb: config
+                .falkordb_url
+                .filter(|url| !url.trim().is_empty())
+                .and_then(|url| FalkorDbClient::new(url).ok()),
         };
         store.migrate()?;
         Ok(store)
@@ -523,6 +543,7 @@ impl DataStore {
         self.upsert_document(&doc)?;
         self.write_audit(doc.id.as_str(), "imported", "system", "Document imported into canonical store", false)?;
 
+        let mut run_embedding_provider = None;
         let chunks = if let Some(text) = &doc.extracted_text {
             stage_start = std::time::Instant::now();
             let chunks = chunk_text(&doc.id, &doc.hash, text, DEFAULT_CHUNK_TARGET_TOKENS, DEFAULT_CHUNK_OVERLAP_TOKENS);
@@ -530,12 +551,18 @@ impl DataStore {
             timings.push(stage_timing("chunk", stage_start.elapsed(), "complete"));
 
             stage_start = std::time::Instant::now();
-            self.write_embeddings(&chunks, "direct-hash")?;
+            let embedding_provider = self.write_embeddings(&chunks)?;
+            run_embedding_provider = Some(embedding_provider);
             timings.push(stage_timing("embed", stage_start.elapsed(), "complete"));
 
             stage_start = std::time::Instant::now();
             self.index_meilisearch(&doc, &chunks).ok();
             timings.push(stage_timing("lexical_index", stage_start.elapsed(), "complete"));
+
+            stage_start = std::time::Instant::now();
+            self.write_graph_edges_for_document(&doc).ok();
+            self.mirror_falkordb_document(&doc).ok();
+            timings.push(stage_timing("graph_index", stage_start.elapsed(), "complete"));
 
             stage_start = std::time::Instant::now();
             self.cache_hot_path(&doc).ok();
@@ -559,7 +586,11 @@ impl DataStore {
         let mut run = PipelineRun::complete(run_id, Some(doc.id.clone()), path_string, timings);
         run.indexed_chunk_count = chunks.len();
         run.ocr_confidence = extraction.ocr_confidence;
-        run.embedding_provider = if chunks.is_empty() { None } else { Some("direct-hash".to_string()) };
+        run.embedding_provider = if chunks.is_empty() {
+            None
+        } else {
+            run_embedding_provider
+        };
         run.rerank_status = "queued".to_string();
         run.updated_at = now();
         self.upsert_pipeline_run(&run)?;
@@ -677,10 +708,11 @@ impl DataStore {
         let trace_id = stable_id("trace", format!("{}:{:?}:{}", query, mode, now()).as_bytes());
         let mut stages = Vec::new();
         let mut candidates = Vec::new();
+        let per_stage_limit = top_k.saturating_mul(4).max(top_k).max(1);
 
         if matches!(mode, SearchMode::Lexical | SearchMode::Hybrid) {
             let start = std::time::Instant::now();
-            let mut lexical = self.lexical_search(query, top_k.saturating_mul(4).max(top_k))?;
+            let mut lexical = self.lexical_search(query, per_stage_limit)?;
             stages.push(RetrievalStageTrace {
                 stage: "meilisearch_or_sqlite_fts".to_string(),
                 count: lexical.len(),
@@ -693,18 +725,60 @@ impl DataStore {
 
         if matches!(mode, SearchMode::Semantic | SearchMode::Hybrid) {
             let start = std::time::Instant::now();
-            let mut semantic = self.semantic_search(query, top_k.saturating_mul(4).max(top_k))?;
+            let mut semantic = self.semantic_search(query, per_stage_limit)?;
             stages.push(RetrievalStageTrace {
                 stage: "sqlite_matryoshka_vector".to_string(),
                 count: semantic.len(),
                 elapsed_ms: start.elapsed().as_millis() as u64,
-                degraded: true,
-                message: Some("Using SQLite Matryoshka vector fallback".to_string()),
+                degraded: self.lancedb.is_none(),
+                message: if self.lancedb.is_some() {
+                    Some("Using live embedding query with SQLite persistence fallback".to_string())
+                } else {
+                    Some("Using SQLite Matryoshka vector fallback".to_string())
+                },
             });
             candidates.append(&mut semantic);
         }
 
-        let mut merged = rrf_merge_candidates(candidates, top_k.saturating_mul(2).max(top_k));
+        let graph_count = if matches!(mode, SearchMode::Hybrid) {
+            let seeds = candidates
+                .iter()
+                .map(|candidate| candidate.document_id.clone())
+                .collect::<Vec<_>>();
+            let start = std::time::Instant::now();
+            let mut graph = self.graph_expand_candidates(&seeds, per_stage_limit)?;
+            let count = graph.len();
+            stages.push(RetrievalStageTrace {
+                stage: "falkordb_or_sqlite_graph".to_string(),
+                count,
+                elapsed_ms: start.elapsed().as_millis() as u64,
+                degraded: self.falkordb.is_none(),
+                message: if self.falkordb.is_some() { None } else { Some("Using SQLite graph edge fallback".to_string()) },
+            });
+            candidates.append(&mut graph);
+            count
+        } else {
+            0
+        };
+
+        let start = std::time::Instant::now();
+        let mut merged = rrf_merge_candidates(candidates, top_k.saturating_mul(2).max(top_k).max(1));
+        let mut reranked = false;
+        if let Some(reranker) = &self.reranker {
+            if let Ok(results) = reranker.rerank(query, &merged, top_k.max(1)) {
+                if !results.is_empty() {
+                    merged = results;
+                    reranked = true;
+                }
+            }
+        }
+        stages.push(RetrievalStageTrace {
+            stage: "colbert_rerank".to_string(),
+            count: merged.len(),
+            elapsed_ms: start.elapsed().as_millis() as u64,
+            degraded: !reranked,
+            message: if reranked { None } else { Some("ColBERT unavailable; returning RRF ranking".to_string()) },
+        });
         merged.truncate(top_k);
         let trace = RetrievalTrace {
             id: trace_id,
@@ -713,8 +787,8 @@ impl DataStore {
             top_k,
             lexical_count: stages.iter().find(|s| s.stage.contains("meilisearch")).map(|s| s.count).unwrap_or(0),
             semantic_count: stages.iter().find(|s| s.stage.contains("sqlite_matryoshka")).map(|s| s.count).unwrap_or(0),
-            graph_count: 0,
-            reranked: false,
+            graph_count,
+            reranked,
             stages,
             results: merged,
             created_at: now(),
@@ -953,6 +1027,13 @@ impl DataStore {
             .embedding
             .as_ref()
             .and_then(|client| client.embed_one(query).ok());
+        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, live_query_vector.as_ref()) {
+            if let Ok(results) = lancedb.search(query_vector, limit) {
+                if !results.is_empty() {
+                    return Ok(results);
+                }
+            }
+        }
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT c.id, c.document_id, d.current_name, d.current_path, c.text, e.vector_json
@@ -1002,6 +1083,7 @@ impl DataStore {
             .unwrap_or_else(|| "direct-hash".to_string());
         let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let tx = conn.transaction()?;
+        let mut lance_records = Vec::new();
         for (index, chunk) in chunks.iter().enumerate() {
             let vector = live_embeddings
                 .as_ref()
@@ -1030,8 +1112,18 @@ impl DataStore {
                     now()
                 ],
             )?;
+            lance_records.push(LanceVectorRecord {
+                id: chunk.id.clone(),
+                document_id: chunk.document_id.clone(),
+                text: chunk.text.clone(),
+                vector,
+                metadata: profile.metadata_context,
+            });
         }
         tx.commit()?;
+        if let Some(lancedb) = &self.lancedb {
+            lancedb.upsert_records(&lance_records).ok();
+        }
         Ok(provider)
     }
 
@@ -1298,38 +1390,30 @@ pub fn chunk_text(
     target_tokens: usize,
     overlap_tokens: usize,
 ) -> Vec<DocumentChunk> {
-    let tokens: Vec<&str> = text.split_whitespace().collect();
-    if tokens.is_empty() {
+    let parts = chunk_by_semantic_token_budget(text, target_tokens, overlap_tokens);
+    if parts.is_empty() {
         return vec![];
     }
-    let target = target_tokens.max(1);
-    let overlap = overlap_tokens.min(target.saturating_sub(1));
-    let step = target.saturating_sub(overlap).max(1);
-    let mut chunks = Vec::new();
-    let mut start = 0usize;
     let created_at = now();
-    while start < tokens.len() {
-        let end = (start + target).min(tokens.len());
-        let chunk_text = tokens[start..end].join(" ");
+    parts
+        .into_iter()
+        .enumerate()
+        .map(|(index, (chunk_text, token_start, token_end))| {
         let text_hash = sha256_hex(chunk_text.as_bytes());
-        let id = stable_id("chunk", format!("{document_hash}:{}:{text_hash}", chunks.len()).as_bytes());
-        chunks.push(DocumentChunk {
+            let id = stable_id("chunk", format!("{document_hash}:{index}:{text_hash}").as_bytes());
+            DocumentChunk {
             id,
             document_id: document_id.to_string(),
-            chunk_index: chunks.len(),
+                chunk_index: index,
             text: chunk_text,
-            token_start: start,
-            token_end: end,
+                token_start,
+                token_end,
             text_hash,
             source_stage: "extract_text".to_string(),
             created_at: created_at.clone(),
-        });
-        if end == tokens.len() {
-            break;
-        }
-        start += step;
-    }
-    chunks
+            }
+        })
+        .collect()
 }
 
 fn rrf_merge_candidates(candidates: Vec<RetrievalCandidate>, top_k: usize) -> Vec<RetrievalCandidate> {
@@ -1633,12 +1717,6 @@ fn token_matrix_hash(token_matrix: &[Vec<f32>]) -> String {
         }
     }
     sha256_hex(&bytes)
-}
-            candidate.score = score as f32;
-            candidate.source_stage = "hybrid_rrf".to_string();
-            candidate
-        })
-        .collect()
 }
 
 #[derive(Debug, Clone)]
