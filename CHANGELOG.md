@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-05-27
+
+### Added
+- Aligned Tauri desktop command parameters with the JS bridge casing so invoke payloads map cleanly across intake, actions, rules, audit, and chat commands.
+- Added live model health checks for the desktop status panel, including embedded chat model loading state plus ColBERT, Jina, and Qwen3 HTTP health probes.
+
 ## [0.1.1] - 2026-05-27
 
 ### Added

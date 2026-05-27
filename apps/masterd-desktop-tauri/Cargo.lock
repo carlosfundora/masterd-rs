@@ -4840,6 +4840,7 @@ dependencies = [
  "masterd-pipeline",
  "masterd-runtime-tune",
  "masterd-sidecars",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",

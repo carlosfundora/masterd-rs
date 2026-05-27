@@ -12,6 +12,7 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use std::time::Duration;
 
 // ── ApiResult envelope ────────────────────────────────────────────────────────
 
@@ -184,16 +185,38 @@ pub struct StorageSummary { #[serde(rename = "indexedFiles")] pub indexed_files:
 pub struct SystemHealth { #[serde(rename = "cpuUsage")] pub cpu_usage: f32, #[serde(rename = "memoryUsage")] pub memory_usage: f32, #[serde(rename = "diskFreeBytes")] pub disk_free_bytes: u64, #[serde(rename = "dbLatencyMs")] pub db_latency_ms: u32, #[serde(rename = "activeThreads")] pub active_threads: u32 }
 
 #[tauri::command]
-async fn system_get_status() -> ApiResult<SystemStatus> {
-    ok(SystemStatus {
+async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<SystemStatus>, String> {
+    let config = state.config.lock().await.clone();
+    let loaded_models = state.chat_engine.loaded_models();
+    let thinking_loaded = loaded_models.contains(&"lfm2.5-thinking-1.2b");
+    let instruct_loaded = loaded_models.contains(&"lfm2.5-instruct-350m");
+
+    let colbert_url = config.colbert_url;
+    let jina_url = config.jina_url;
+    let qwen3_url = config.qwen3_url;
+
+    let colbert_health = tokio::task::spawn_blocking(move || check_service_health(&colbert_url))
+        .await
+        .unwrap_or_else(|_| "offline".to_string());
+    let jina_health = tokio::task::spawn_blocking(move || check_service_health(&jina_url))
+        .await
+        .unwrap_or_else(|_| "offline".to_string());
+    let qwen3_health = tokio::task::spawn_blocking(move || check_service_health(&qwen3_url))
+        .await
+        .unwrap_or_else(|_| "offline".to_string());
+
+    Ok(ok(SystemStatus {
         engine: "online".to_string(), database: "connected".to_string(), watcher: "active".to_string(),
         models: vec![
-            ModelStatus { id: "lfm2.5-thinking".into(), name: "LFM2.5 1.2B Thinking".into(), role: "summarization".into(), status: "online".into() },
-            ModelStatus { id: "lfm2.5-instruct".into(), name: "LFM2.5 350M Instruct".into(), role: "classification".into(), status: "online".into() },
+            ModelStatus { id: "lfm2.5-thinking".into(), name: "LFM2.5 1.2B Thinking".into(), role: "summarization".into(), status: if thinking_loaded { "online".into() } else { "offline".into() } },
+            ModelStatus { id: "lfm2.5-instruct".into(), name: "LFM2.5 350M Instruct".into(), role: "classification".into(), status: if instruct_loaded { "online".into() } else { "offline".into() } },
+            ModelStatus { id: "colbert-reranker".into(), name: "ColBERT 350M Reranker".into(), role: "reranking".into(), status: colbert_health },
+            ModelStatus { id: "jina-embedding".into(), name: "Jina v3 Embedding".into(), role: "embedding".into(), status: jina_health },
+            ModelStatus { id: "qwen3-embedding".into(), name: "Qwen3 Embedding".into(), role: "embedding".into(), status: qwen3_health },
         ],
         queues: QueueCounts { pending: 0, processing: 0, review: 0, complete_today: 0, errors: 0 },
         storage: StorageSummary { indexed_files: 0, total_bytes: 0 },
-    })
+    }))
 }
 
 #[tauri::command]
@@ -222,11 +245,28 @@ fn num_logical_cpus() -> u32 {
         .map(|s| s.lines().filter(|l| l.starts_with("processor")).count() as u32).unwrap_or(1)
 }
 
+fn check_service_health(url: &str) -> String {
+    let health_url = format!("{}/health", url.trim_end_matches('/'));
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(500))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return "offline".into(),
+    };
+
+    match client.get(health_url).send() {
+        Ok(response) if response.status().is_success() => "online".into(),
+        _ => "offline".into(),
+    }
+}
+
 // ── Typed fallback commands (backed by future masterd-db) ─────────────────────
 #[tauri::command]
+#[allow(non_snake_case)]
 async fn intake_add_files(
     paths: Vec<String>,
-    #[allow(unused)] profile_id: Option<String>,
+    #[allow(unused)] profileId: Option<String>,
 ) -> ApiResult<Vec<crate::state::IntakeQueueItem>> {
     let now = now_ts();
     let items = paths
@@ -380,10 +420,11 @@ async fn intake_list_watch_folders(
 
 /// Register a folder and immediately scan + index all readable text files.
 #[tauri::command]
+#[allow(non_snake_case)]
 async fn intake_add_watch_folder(
     state: State<'_, AppState>,
     path: String,
-    #[allow(unused)] profile_id: Option<String>,
+    #[allow(unused)] profileId: Option<String>,
 ) -> Result<ApiResult<crate::state::WatchFolderEntry>, String> {
     use masterd_chat_engine::IndexedDocument;
     use std::path::Path;
@@ -436,7 +477,7 @@ async fn intake_add_watch_folder(
         id: Uuid::new_v4().to_string(),
         path: path.clone(),
         enabled: true,
-        profile_id: profile_id.unwrap_or_else(|| "Full Analysis".into()),
+        profile_id: profileId.unwrap_or_else(|| "Full Analysis".into()),
         file_count: count,
         created_at: now_ts(),
     };
@@ -478,28 +519,33 @@ async fn intake_list_queue(
     Ok(ok(Paginated { items, total, limit: 50, offset: 0 }))
 }
 #[tauri::command]
-async fn actions_approve_rename(document_id: String, suggested_name: Option<String>) -> ApiResult<ActionResult> {
-    ok(empty_action(document_id, suggested_name.map(|n| format!("rename approved: {n}")).unwrap_or_else(|| "rename approved".into())))
+#[allow(non_snake_case)]
+async fn actions_approve_rename(documentId: String, suggestedName: Option<String>) -> ApiResult<ActionResult> {
+    ok(empty_action(documentId, suggestedName.map(|n| format!("rename approved: {n}")).unwrap_or_else(|| "rename approved".into())))
 }
 
 #[tauri::command]
-async fn actions_reject_rename(document_id: String, reason: Option<String>) -> ApiResult<ActionResult> {
-    ok(empty_action(document_id, reason.unwrap_or_else(|| "rename rejected".into())))
+#[allow(non_snake_case)]
+async fn actions_reject_rename(documentId: String, reason: Option<String>) -> ApiResult<ActionResult> {
+    ok(empty_action(documentId, reason.unwrap_or_else(|| "rename rejected".into())))
 }
 
 #[tauri::command]
-async fn actions_approve_move(document_id: String, destination_path: String) -> ApiResult<ActionResult> {
-    ok(empty_action(document_id, format!("move approved: {destination_path}")))
+#[allow(non_snake_case)]
+async fn actions_approve_move(documentId: String, destinationPath: String) -> ApiResult<ActionResult> {
+    ok(empty_action(documentId, format!("move approved: {destinationPath}")))
 }
 
 #[tauri::command]
-async fn actions_mark_duplicate(document_id: String, duplicate_of_id: String) -> ApiResult<ActionResult> {
-    ok(empty_action(document_id, format!("marked duplicate of {duplicate_of_id}")))
+#[allow(non_snake_case)]
+async fn actions_mark_duplicate(documentId: String, duplicateOfId: String) -> ApiResult<ActionResult> {
+    ok(empty_action(documentId, format!("marked duplicate of {duplicateOfId}")))
 }
 
 #[tauri::command]
-async fn actions_mark_unique(document_id: String) -> ApiResult<ActionResult> {
-    ok(empty_action(document_id, "marked unique"))
+#[allow(non_snake_case)]
+async fn actions_mark_unique(documentId: String) -> ApiResult<ActionResult> {
+    ok(empty_action(documentId, "marked unique"))
 }
 
 #[tauri::command]
@@ -572,9 +618,10 @@ async fn rules_delete(id: String) -> ApiResult<EmptyOk> {
 }
 
 #[tauri::command]
-async fn rules_test(rule: serde_json::Value, document_id: Option<String>) -> ApiResult<RuleTestResult> {
+#[allow(non_snake_case)]
+async fn rules_test(rule: serde_json::Value, documentId: Option<String>) -> ApiResult<RuleTestResult> {
     ok(RuleTestResult {
-        matched: document_id.is_some() || !rule.is_null(),
+        matched: documentId.is_some() || !rule.is_null(),
         actions_evaluated: vec![json!({
             "type": "contract_check",
             "applied": true,
@@ -589,14 +636,16 @@ async fn audit_list(#[allow(unused)] params: Option<serde_json::Value>) -> ApiRe
 }
 
 #[tauri::command]
-async fn audit_get_for_document(document_id: String) -> ApiResult<Vec<AuditEntry>> {
-    let _ = document_id;
+#[allow(non_snake_case)]
+async fn audit_get_for_document(documentId: String) -> ApiResult<Vec<AuditEntry>> {
+    let _ = documentId;
     ok(vec![])
 }
 
 #[tauri::command]
-async fn audit_revert(entry_id: String) -> ApiResult<ActionResult> {
-    ok(empty_action(entry_id, "audit entry reverted"))
+#[allow(non_snake_case)]
+async fn audit_revert(entryId: String) -> ApiResult<ActionResult> {
+    ok(empty_action(entryId, "audit entry reverted"))
 }
 
 fn empty_rule(id: String) -> AutomationRule {
@@ -765,36 +814,37 @@ pub enum ChatStreamToken {
 pub struct ChatCitation { pub title: String, pub url: String }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 async fn chat_send_message(
     app: AppHandle,
     state: State<'_, AppState>,
     message: String,
-    think_mode: String,
-    search_mode: String,
-    session_id: String,
-    channel_id: String,
+    thinkMode: String,
+    searchMode: String,
+    sessionId: String,
+    channelId: String,
 ) -> Result<(), String> {
     use masterd_chat_engine::{ThinkMode, SearchMode};
 
-    let think_mode = match think_mode.as_str() {
+    let think_mode = match thinkMode.as_str() {
         "Thinking" => ThinkMode::Thinking,
         "Instruct" => ThinkMode::Instruct,
         _          => ThinkMode::Auto,
     };
-    let search_mode = match search_mode.as_str() {
+    let search_mode = match searchMode.as_str() {
         "WebSearch" => SearchMode::WebSearch,
         "Both"      => SearchMode::Both,
         _           => SearchMode::LocalDocuments,
     };
 
-    let event_name = format!("masterd://chat/{channel_id}");
+    let event_name = format!("masterd://chat/{channelId}");
     let (tx, mut rx) = mpsc::channel::<ChatToken>(128);
     let engine = state.chat_engine.clone();
     let sessions = state.sessions.clone();
 
     // Spawn generation: get-or-create session, run chat, persist updated session back.
     let (session_done_tx, session_done_rx) = tokio::sync::oneshot::channel();
-    let gen_session_id = session_id.clone();
+    let gen_session_id = sessionId.clone();
     tokio::spawn(async move {
         use masterd_chat_engine::ChatSession;
         let session_snapshot = {
