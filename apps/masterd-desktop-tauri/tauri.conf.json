@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../masterd-shell/out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "bash -lc 'for d in apps/masterd-shell masterd-shell ../masterd-shell; do if [ -f \"$d/package.json\" ]; then exec npm --prefix \"$d\" run dev; fi; done; echo \"masterd-shell package.json not found\" >&2; exit 1'",
-    "beforeBuildCommand": "bash -lc 'for d in apps/masterd-shell masterd-shell ../masterd-shell; do if [ -f \"$d/package.json\" ]; then exec npm --prefix \"$d\" run build; fi; done; echo \"masterd-shell package.json not found\" >&2; exit 1'"
+    "beforeDevCommand": "masterd-desktop-tauri/dev-shell.sh",
+    "beforeBuildCommand": "masterd-desktop-tauri/build-shell.sh"
   },
   "app": {
     "windows": [
@@ -38,9 +38,13 @@
       "binaries/valkey-server": "bin/valkey-server",
       "modules/falkordb.so": "modules/falkordb.so"
     },
-    "icon": ["icons/icon.png"],
+    "icon": [
+      "icons/icon.png"
+    ],
     "linux": {
-      "deb": { "depends": [] },
+      "deb": {
+        "depends": []
+      },
       "appimage": {}
     }
   }

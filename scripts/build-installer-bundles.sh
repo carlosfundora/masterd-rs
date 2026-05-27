@@ -262,7 +262,7 @@ fi
 
 # ── Frontend build ─────────────────────────────────────────────────────────
 printf "%b║%b  Building Next.js frontend...%b\n" "${RED}" "${CYAN}" "${RESET}"
-(cd "${ROOT_DIR}/apps/masterd-shell" && npm ci --silent && npm run build)
+"${ROOT_DIR}/apps/masterd-desktop-tauri/build-shell.sh"
 printf "%b║%b  Frontend built.%b\n" "${RED}" "${GREEN}" "${RESET}"
 
 # ── Tauri app + installer bundle ──────────────────────────────────────────
