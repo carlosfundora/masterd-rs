@@ -38,13 +38,9 @@
       "binaries/valkey-server": "bin/valkey-server",
       "modules/falkordb.so": "modules/falkordb.so"
     },
-    "icon": [
-      "icons/icon.png"
-    ],
+    "icon": ["icons/icon.png"],
     "linux": {
-      "deb": {
-        "depends": []
-      },
+      "deb": { "depends": [] },
       "appimage": {}
     }
   }
