@@ -415,7 +415,7 @@ export default function Home() {
         {/* Chat panel (slide in from right) */}
         {chatOpen && (
           <div className="flex-1 min-w-[320px] max-w-[480px] flex flex-col border-l border-[#183040] overflow-hidden">
-            <ChatPanel />
+            <ChatPanel bridge={bridge} />
           </div>
         )}
 

@@ -4,6 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHELL_DIR="${ROOT_DIR}/apps/masterd-shell"
 
+# Native build tooling expects rm -f semantics for generated dependency files.
+# Some local shells shadow rm with trash-cli; opt out for pnpm/node-gyp/make.
+export RM_NO_TRASH=1
+
 source "${ROOT_DIR}/scripts/lib/install-bootstrap.sh"
 masterd_ensure_pnpm "${ROOT_DIR}"
 

@@ -1,8 +1,31 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Bot, Search, Brain, Globe, HardDrive, Layers, Send, ChevronDown, ChevronRight, X, Loader2 } from "lucide-react";
-import { startChat, ThinkMode, SearchMode, ChatStreamToken } from "../lib/tauri-bridge";
+import {
+  Bot,
+  Search,
+  Brain,
+  Globe,
+  HardDrive,
+  Layers,
+  Send,
+  ChevronDown,
+  ChevronRight,
+  X,
+  Loader2,
+  Sparkles,
+  ShieldCheck,
+} from "lucide-react";
+import {
+  startChat,
+  ThinkMode,
+  SearchMode,
+  ChatStreamToken,
+} from "../lib/tauri-bridge";
+import {
+  AutomationRuleDraft,
+  MasterdFrontendBridge,
+} from "../contracts/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,12 +43,77 @@ type ChatBubble = {
 
 // ── ChatPanel ─────────────────────────────────────────────────────────────────
 
-export default function ChatPanel() {
+type ChatPanelProps = {
+  bridge?: MasterdFrontendBridge | null;
+};
+
+function extractDraftBlock(text: string): string | null {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) return fenced[1].trim();
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) return text.slice(start, end + 1).trim();
+  return null;
+}
+
+function isPolicyRequest(text: string): boolean {
+  const lower = text.toLowerCase();
+  return /(^|[\s/])(policy|polic(?:y|ies)|rule|rules|automation)([\s:,-]|$)/.test(lower)
+    || lower.includes("create a rule")
+    || lower.includes("make a rule")
+    || lower.includes("draft a policy")
+    || lower.includes("make policy");
+}
+
+function normalizeDraft(candidate: Record<string, unknown>, fallbackName: string): AutomationRuleDraft | null {
+  const triggerEvent = candidate.trigger && typeof candidate.trigger === "object"
+    ? (candidate.trigger as Record<string, unknown>).event
+    : undefined;
+  const conditions = Array.isArray(candidate.conditions) ? candidate.conditions : [];
+  const actions = Array.isArray(candidate.actions) ? candidate.actions : [];
+
+  if (!Array.isArray(conditions) || !Array.isArray(actions)) return null;
+
+  const draft: AutomationRuleDraft = {
+    name: typeof candidate.name === "string" && candidate.name.trim() ? candidate.name.trim() : fallbackName,
+    description: typeof candidate.description === "string" && candidate.description.trim()
+      ? candidate.description.trim()
+      : undefined,
+    enabled: typeof candidate.enabled === "boolean" ? candidate.enabled : true,
+    priority: typeof candidate.priority === "number" ? candidate.priority : 5,
+    trigger: {
+      event:
+        triggerEvent === "file_imported" ||
+        triggerEvent === "hash_complete" ||
+        triggerEvent === "classification_complete" ||
+        triggerEvent === "duplicate_detected" ||
+        triggerEvent === "extraction_complete" ||
+        triggerEvent === "manual"
+          ? triggerEvent
+          : "classification_complete",
+    },
+    conditions: conditions as AutomationRuleDraft["conditions"],
+    actions: actions as AutomationRuleDraft["actions"],
+    safetyLevel:
+      candidate.safetyLevel === "safe" ||
+      candidate.safetyLevel === "review_required" ||
+      candidate.safetyLevel === "destructive"
+        ? candidate.safetyLevel
+        : "review_required",
+  };
+
+  return draft;
+}
+
+export default function ChatPanel({ bridge }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatBubble[]>([]);
   const [input, setInput] = useState("");
   const [thinkMode, setThinkMode] = useState<ThinkMode>("Auto");
   const [searchMode, setSearchMode] = useState<SearchMode>("LocalDocuments");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [policyMode, setPolicyMode] = useState(false);
+  const [draftStatus, setDraftStatus] = useState<string | null>(null);
   const [sessionId] = useState(() => crypto.randomUUID());
   const scrollRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
@@ -41,8 +129,20 @@ export default function ChatPanel() {
     const text = input.trim();
     if (!text || isStreaming) return;
 
+    const wantsPolicyDraft = policyMode || isPolicyRequest(text);
+    const requestText = wantsPolicyDraft
+      ? [
+          "You are drafting an automation rule for MASTERd.",
+          "Return ONLY a single JSON object with these keys:",
+          '{"name":string,"description"?:string,"enabled":boolean,"priority":number,"trigger":{"event":"file_imported"|"hash_complete"|"classification_complete"|"duplicate_detected"|"extraction_complete"|"manual"},"conditions":[{"field":string,"operator":"equals"|"not_equals"|"contains"|"starts_with"|"ends_with"|"greater_than"|"less_than"|"exists","value"?:unknown}],"actions":[{"type":"suggest_tag"|"suggest_rename"|"route_storage"|"require_review"|"mark_duplicate"|"set_classification",...}],"safetyLevel":"safe"|"review_required"|"destructive"}',
+          "Make the rule conservative. Prefer review_required if there is ambiguity.",
+          `User request: ${text}`,
+        ].join("\n")
+      : text;
+
     setInput("");
     setIsStreaming(true);
+    setDraftStatus(null);
 
     const userBubble: ChatBubble = {
       id: crypto.randomUUID(),
@@ -66,8 +166,9 @@ export default function ChatPanel() {
 
     setMessages((prev) => [...prev, userBubble, assistantBubble]);
 
+    let completedText = "";
     const cancel = await startChat(
-      text,
+      requestText,
       thinkMode,
       searchMode,
       sessionId,
@@ -79,6 +180,7 @@ export default function ChatPanel() {
               case "think":
                 return { ...m, thinkText: (m.thinkText ?? "") + token.text };
               case "response":
+                completedText += token.text;
                 return { ...m, responseText: m.responseText + token.text };
               case "done":
                 return { ...m, citations: token.citations, streaming: false };
@@ -93,12 +195,61 @@ export default function ChatPanel() {
         if (token.type === "done" || token.type === "error") {
           setIsStreaming(false);
           cancelRef.current = null;
+
+          if (token.type === "done" && wantsPolicyDraft) {
+            const raw = extractDraftBlock(completedText);
+            if (!raw) {
+              setDraftStatus("Could not read a policy draft from the assistant response.");
+              return;
+            }
+
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(raw);
+            } catch {
+              setDraftStatus("The assistant did not return valid JSON for a policy draft.");
+              return;
+            }
+
+            const draft =
+              parsed && typeof parsed === "object"
+                ? normalizeDraft(parsed as Record<string, unknown>, text)
+                : null;
+            if (!draft) {
+              setDraftStatus("The generated policy draft was incomplete.");
+              return;
+            }
+
+            if (!bridge) {
+              setDraftStatus(`Draft ready: ${draft.name} (connect the bridge to save it).`);
+              return;
+            }
+
+            bridge.rules.create(draft).then((res) => {
+              if (res.ok) {
+                setDraftStatus(`Policy created: ${res.data.name}`);
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: crypto.randomUUID(),
+                    role: "assistant",
+                    responseText: `Policy created: ${res.data.name}. It is now available in Automation Rules.`,
+                    citations: [],
+                    streaming: false,
+                    thinkExpanded: false,
+                  },
+                ]);
+              } else {
+                setDraftStatus(`Policy draft created, but save failed: ${res.error.message}`);
+              }
+            });
+          }
         }
       }
     );
 
     cancelRef.current = cancel;
-  }, [input, isStreaming, thinkMode, searchMode, sessionId]);
+  }, [bridge, input, isStreaming, policyMode, thinkMode, searchMode, sessionId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -120,12 +271,25 @@ export default function ChatPanel() {
       {/* Header */}
       <div className="px-4 py-3 border-b border-[#183040] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          <Bot className="w-4 h-4 text-[#00E5FF]" />
+          <Bot className="w-4 h-4 text-[#fca5a5]" />
           <span className="text-[11px] font-mono font-bold tracking-widest text-[#00E5FF] uppercase">
             MASTERd Intelligence
           </span>
         </div>
-        <div className="text-[9px] font-mono text-[#3A5568] uppercase tracking-widest">LFM2.5 · LOCAL</div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPolicyMode((v) => !v)}
+            className={`inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-widest px-2 py-1 rounded-[2px] border ${
+              policyMode
+                ? "border-[#7f1d1d] text-[#fecaca] bg-[#7f1d1d]/15"
+                : "border-[#183040] text-[#6C8798]"
+            }`}
+          >
+            <Sparkles className="w-3 h-3" />
+            policy mode
+          </button>
+          <div className="text-[9px] font-mono text-[#3A5568] uppercase tracking-widest">LFM2.5 · LOCAL</div>
+        </div>
       </div>
 
       {/* Mode controls */}
@@ -183,9 +347,9 @@ export default function ChatPanel() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center gap-3 opacity-40">
-            <Bot className="w-8 h-8 text-[#00E5FF]" />
+            <Bot className="w-8 h-8 text-[#fca5a5]" />
             <p className="text-[11px] font-mono text-[#6C8798] max-w-xs">
-              Ask MASTERd anything about your documents or any topic. Uses your indexed documents + optional web search.
+              Ask MASTERd anything about your documents or any topic. Toggle policy mode to turn plain-language instructions into rules.
             </p>
           </div>
         )}
@@ -253,6 +417,15 @@ export default function ChatPanel() {
             )}
           </div>
         ))}
+
+        {draftStatus && (
+          <div className="flex justify-center">
+            <div className="max-w-[92%] border border-[#7f1d1d]/30 bg-[#7f1d1d]/10 text-[#fecaca] rounded-[6px] px-3 py-2 text-[11px] font-mono flex items-start gap-2">
+              <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{draftStatus}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Input area */}
@@ -262,7 +435,7 @@ export default function ChatPanel() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask MASTERd…"
+            placeholder={policyMode ? "Describe the policy you want MASTERd to create…" : "Ask MASTERd…"}
             rows={2}
             disabled={isStreaming}
             className="flex-1 bg-[#0B1018] border border-[#183040] rounded-[4px] px-3 py-2 text-[12px] text-[#E6F7FF] placeholder-[#3A5568] font-mono resize-none focus:outline-none focus:border-[#00E5FF]/40 disabled:opacity-50 leading-relaxed"
