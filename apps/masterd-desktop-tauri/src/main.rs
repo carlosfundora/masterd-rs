@@ -223,7 +223,6 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
 
     let colbert_url = config.colbert_url;
     let jina_url = config.jina_url;
-    let qwen3_url = config.qwen3_url;
 
     let colbert_health = tokio::task::spawn_blocking(move || check_service_health(&colbert_url))
         .await
@@ -231,10 +230,6 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
     let jina_health = tokio::task::spawn_blocking(move || check_service_health(&jina_url))
         .await
         .unwrap_or_else(|_| "offline".to_string());
-    let qwen3_health = tokio::task::spawn_blocking(move || check_service_health(&qwen3_url))
-        .await
-        .unwrap_or_else(|_| "offline".to_string());
-
     Ok(ok(SystemStatus {
         engine: "online".to_string(), database: "connected".to_string(), watcher: "active".to_string(),
         models: vec![
@@ -242,7 +237,6 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
             ModelStatus { id: "lfm2.5-instruct".into(), name: "LFM2.5 350M Instruct".into(), role: "classification".into(), status: if instruct_loaded { "online".into() } else { "offline".into() } },
             ModelStatus { id: "colbert-reranker".into(), name: "ColBERT 350M Reranker".into(), role: "reranking".into(), status: colbert_health },
             ModelStatus { id: "jina-embedding".into(), name: "Jina v3 Embedding".into(), role: "embedding".into(), status: jina_health },
-            ModelStatus { id: "qwen3-embedding".into(), name: "Qwen3 Embedding".into(), role: "embedding".into(), status: qwen3_health },
         ],
         queues: QueueCounts {
             pending: pending as u32,
