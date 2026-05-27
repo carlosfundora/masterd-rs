@@ -1,8 +1,8 @@
 packages:
   - "."
 allowBuilds:
-  '@tailwindcss/oxide': set this to true or false
-  protobufjs: set this to true or false
-  re2: set this to true or false
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
+  '@tailwindcss/oxide': true
+  protobufjs: true
+  re2: true
+  sharp: true
+  unrs-resolver: true
