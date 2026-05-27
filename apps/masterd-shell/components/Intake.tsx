@@ -93,16 +93,16 @@ export default function Intake({
   };
 
   return (
-    <div id="intake-screen" className="space-y-6 text-[#E6F7FF]">
+    <div id="intake-screen" className="space-y-6 text-[#f4f4f5]">
       
       {/* Visual Workspace Row: Drop Zone + Watch Folder Settings */}
       <div id="intake-top-grid" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Drop zone segment */}
-        <div id="dropzone-and-samples" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] lg:col-span-2 space-y-4">
-          <div className="border-b border-[#183040] pb-3">
+        <div id="dropzone-and-samples" className="bg-[#111113] border border-[#27272a] p-5 rounded-[4px] lg:col-span-2 space-y-4">
+          <div className="border-b border-[#27272a] pb-3">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-              <Upload className="w-4 h-4 text-[#00E5FF]" /> Active Document Ingestion Core
+              <Upload className="w-4 h-4 text-[#fca5a5]" /> Document Intake
             </h2>
           </div>
 
@@ -115,29 +115,29 @@ export default function Intake({
               onDrop={handleDrop}
               className={`md:col-span-2 aspect-video flex flex-col justify-center items-center p-6 border border-dashed rounded-[4px] cursor-pointer transition-all ${
                 isDragOver 
-                  ? "border-[#00E5FF] bg-[#00E5FF]/5 scale-[0.99]" 
-                  : "border-[#183040] bg-[#05070A]/80 hover:bg-[#101827]/40 hover:border-[#3B82F6]"
+                  ? "border-[#b91c1c] bg-[#7f1d1d]/5 scale-[0.99]" 
+                  : "border-[#27272a] bg-[#09090b]/80 hover:bg-[#18181b]/70 hover:border-[#b91c1c]/70"
               }`}
               onClick={() => handleIngestFile(sampleDocuments[0].name)}
             >
               <div className="text-center space-y-2">
-                <Upload className={`w-8 h-8 mx-auto transition-transform ${isDragOver ? 'scale-110 text-[#00E5FF] animate-bounce' : 'text-[#6C8798]'}`} />
+                  <Upload className={`w-8 h-8 mx-auto transition-transform ${isDragOver ? 'scale-110 text-[#fca5a5] animate-bounce' : 'text-[#71717a]'}`} />
                 <div className="space-y-1">
                   <p className="text-xs font-semibold text-[#E6F7FF]">
-                    Drag & Drop records here or <span className="text-[#00E5FF] underline">click to select</span>
+                      Drag & drop records here or <span className="text-[#fca5a5] underline">click to select</span>
                   </p>
-                  <p className="text-[10px] text-[#6C8798] max-w-xs mx-auto">
-                    Supports secure OCR ingestion of PDF, JPG, PNG, and TXT files. Isolated local-first hashing.
+                    <p className="text-[10px] text-[#a1a1aa] max-w-xs mx-auto">
+                      Supports PDF, JPG, PNG, and TXT files with local hashing and extraction.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Simulated file samples */}
-            <div className="bg-[#05070A] border border-[#183040]/70 p-3.5 rounded-[4px] space-y-3">
+            {/* Sample files */}
+            <div className="bg-[#09090b] border border-[#27272a]/70 p-3.5 rounded-[4px] space-y-3">
               <div>
-                <h4 className="text-[10px] uppercase font-mono tracking-wider font-bold text-[#6C8798]">Test Rig Sandbox</h4>
-                <p className="text-[10px] text-[#A7C7D9] mt-0.5 leading-tight">Click on any sample record to simulate manual document ingestion:</p>
+                  <h4 className="text-[10px] uppercase font-mono tracking-wider font-bold text-[#71717a]">Starter samples</h4>
+                  <p className="text-[10px] text-[#a1a1aa] mt-0.5 leading-tight">Use these examples to explore ingestion behavior.</p>
               </div>
 
               <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
@@ -145,12 +145,12 @@ export default function Intake({
                   <button
                     key={idx}
                     onClick={() => handleIngestFile(s.name)}
-                    className="w-full text-left p-1.5 bg-[#0B1018] hover:bg-[#3B82F6]/5 hover:border-[#3B82F6] border border-[#183040] rounded-[2px] transition-colors flex items-center gap-2 text-[11px] font-mono"
+                    className="w-full text-left p-1.5 bg-[#111113] hover:bg-[#7f1d1d]/5 hover:border-[#b91c1c] border border-[#27272a] rounded-[2px] transition-colors flex items-center gap-2 text-[11px] font-mono"
                   >
-                    <PlayCircle className="w-3.5 h-3.5 text-[#00E5FF]" />
+                    <PlayCircle className="w-3.5 h-3.5 text-[#fca5a5]" />
                     <div className="truncate flex-1">
-                      <div className="truncate text-[#E6F7FF]">{s.name}</div>
-                      <div className="text-[9px] text-[#6C8798]">{s.size}</div>
+                      <div className="truncate text-[#f4f4f5]">{s.name}</div>
+                      <div className="text-[9px] text-[#71717a]">{s.size}</div>
                     </div>
                   </button>
                 ))}
@@ -161,12 +161,12 @@ export default function Intake({
 
           {/* Import profiles select configuration link */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-[#183040]/60">
-            <div className="flex items-center gap-1.5 text-xs text-[#A7C7D9]">
+            <div className="flex items-center gap-1.5 text-xs text-[#a1a1aa]">
               <span className="font-semibold text-xs">Active Import Profile:</span>
               <select
                 value={selectedProfile}
                 onChange={e => setSelectedProfile(e.target.value)}
-                className="bg-[#05070A] border border-[#183040] text-xs font-mono text-[#00E5FF] rounded-[2px] p-1 focus:outline-none"
+                className="bg-[#09090b] border border-[#27272a] text-xs font-mono text-[#fca5a5] rounded-[2px] p-1 focus:outline-none"
               >
                 <option value="Fast Scan">Fast Scan (Metadata + SHA Check)</option>
                 <option value="Full Analysis">Full Analysis (OCR + MASTERd Classifier + Tagging)</option>
@@ -176,23 +176,23 @@ export default function Intake({
                 <option value="Research Archive">Academic Research Archive Profile</option>
               </select>
             </div>
-            <span className="font-mono text-[10px] text-green-400 bg-green-500/10 px-1.5 py-0.5 border border-green-500/20 rounded-[2px] flex items-center gap-1">
-              <Check className="w-3 h-3" /> Offline Engine: Active
+            <span className="font-mono text-[10px] text-[#fca5a5] bg-[#7f1d1d]/10 px-1.5 py-0.5 border border-[#7f1d1d]/20 rounded-[2px] flex items-center gap-1">
+              <Check className="w-3 h-3" /> Local engine ready
             </span>
           </div>
 
         </div>
 
         {/* Watch Folders Settings */}
-        <div id="watch-folders-panel" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
-          <div className="border-b border-[#183040] pb-3">
+        <div id="watch-folders-panel" className="bg-[#111113] border border-[#27272a] p-5 rounded-[4px] space-y-4">
+          <div className="border-b border-[#27272a] pb-3">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-              <MonitorPlay className="w-4 h-4 text-[#3B82F6]" /> Active Watch Folders
+              <MonitorPlay className="w-4 h-4 text-[#fca5a5]" /> Watch folders
             </h2>
           </div>
 
-          <p className="text-xs text-[#A7C7D9]">
-            Files placed inside watch folders are automatically scanned into the system queue using the assigned import profile.
+          <p className="text-xs text-[#a1a1aa]">
+            Files placed inside watch folders are scanned into the queue using the selected import profile.
           </p>
 
           <form onSubmit={handleAddWatchFolder} className="flex gap-1.5">
@@ -201,11 +201,11 @@ export default function Intake({
               placeholder="E.g., /Users/user/Downloads"
               value={folderPathInput}
               onChange={e => setFolderPathInput(e.target.value)}
-              className="flex-1 bg-[#05070A] border border-[#183040] px-2.5 py-1.5 text-xs font-mono rounded-[4px] text-[#E6F7FF] focus:outline-none focus:border-[#3B82F6] placeholder-[#3E5360]"
+              className="flex-1 bg-[#09090b] border border-[#27272a] px-2.5 py-1.5 text-xs font-mono rounded-[4px] text-[#f4f4f5] focus:outline-none focus:border-[#b91c1c] placeholder-[#71717a]"
             />
             <button
               type="submit"
-              className="px-3 bg-[#3B82F6] hover:bg-blue-600 border border-[#3B82F6] text-white rounded-[4px] flex items-center justify-center p-1 cursor-pointer"
+              className="px-3 bg-[#b91c1c] hover:bg-[#991b1b] border border-[#b91c1c] text-white rounded-[4px] flex items-center justify-center p-1 cursor-pointer"
               title="Add Watch Folder"
             >
               <FolderPlus className="w-4 h-4" />
@@ -217,13 +217,13 @@ export default function Intake({
             {watchFolders.map(wf => (
               <div 
                 key={wf.id}
-                className="p-2 bg-[#05070A] border border-[#183040] rounded-[4px] flex justify-between items-center text-xs group"
+                className="p-2 bg-[#09090b] border border-[#27272a] rounded-[4px] flex justify-between items-center text-xs group"
               >
                 <div className="space-y-0.5 min-w-0 flex-1 pr-2">
-                  <div className="font-mono text-[#E6F7FF] truncate text-[11px]" title={wf.path}>
+                  <div className="font-mono text-[#f4f4f5] truncate text-[11px]" title={wf.path}>
                     {wf.path}
                   </div>
-                  <div className="text-[9px] text-[#789BB0] flex items-center gap-1 font-mono">
+                  <div className="text-[9px] text-[#a1a1aa] flex items-center gap-1 font-mono">
                     <span>{wf.profileId}</span>
                     <span>•</span>
                     <span>{wf.fileCount} files scanned</span>
@@ -231,7 +231,7 @@ export default function Intake({
                 </div>
                 <button
                   onClick={() => handleRemoveWatchFolder(wf.id)}
-                  className="p-1 text-[#6C8798] hover:text-red-400 hover:bg-red-400/5 rounded-[4px] shrink-0"
+                  className="p-1 text-[#71717a] hover:text-[#fca5a5] hover:bg-[#7f1d1d]/5 rounded-[4px] shrink-0"
                   title="Remove Watcher Folder pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -239,7 +239,7 @@ export default function Intake({
               </div>
             ))}
             {watchFolders.length === 0 && (
-              <div className="text-center py-4 text-[#3E5360] italic font-mono text-[11px]">
+              <div className="text-center py-4 text-[#71717a] italic font-mono text-[11px]">
                 0 directories monitored.
               </div>
             )}
@@ -249,13 +249,13 @@ export default function Intake({
       </div>
 
       {/* Queue items Table segment */}
-      <div id="intake-queue-table-block" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
+      <div id="intake-queue-table-block" className="bg-[#111113] border border-[#27272a] p-5 rounded-[4px] space-y-4">
         
-        <div className="flex justify-between items-center border-b border-[#183040] pb-3">
+        <div className="flex justify-between items-center border-b border-[#27272a] pb-3">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-            <RefreshCw className="w-4 h-4 text-[#00E5FF] animate-spin-slow" /> Real-time Ingestion Processing Queue
+            <RefreshCw className="w-4 h-4 text-[#fca5a5] animate-spin-slow" /> Ingestion queue
           </h2>
-          <span className="font-mono text-xs text-[#00E5FF] bg-[#00E5FF]/10 px-2.5 py-0.5 rounded-[2px]">
+          <span className="font-mono text-xs text-[#fca5a5] bg-[#7f1d1d]/10 px-2.5 py-0.5 rounded-[2px]">
             {intakeQueue.filter(i => i.status !== "complete" && i.status !== "error").length} In-Flight Jobs
           </span>
         </div>

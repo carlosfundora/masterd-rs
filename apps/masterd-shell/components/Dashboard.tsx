@@ -26,80 +26,80 @@ export default function Dashboard({
   const pendingReviews = reviewQueue.filter(r => !r.resolved);
 
   return (
-    <div id="dashboard-screen" className="space-y-6 text-[#E6F7FF]">
+    <div id="dashboard-screen" className="space-y-6 text-[#f4f4f5]">
       {/* Overview stats cards */}
       <div id="stats-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div id="stat-card-files" className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-[#3B82F6]" />
+        <div id="stat-card-files" className="bg-[#111113] border border-[#27272a] p-4 rounded-[4px] relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-[#b91c1c]" />
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-xs uppercase tracking-[0.16em] text-[#6C8798]">Files Indexed</p>
-              <h3 className="text-3xl font-semibold tracking-tight text-[#E6F7FF] mt-1">
+              <p className="text-xs uppercase tracking-[0.16em] text-[#71717a]">Files Indexed</p>
+              <h3 className="text-3xl font-semibold tracking-tight text-[#f4f4f5] mt-1">
                 {status?.storage.indexedFiles ?? 0}
               </h3>
             </div>
-            <div className="p-2 bg-[#3B82F6]/10 rounded-[4px] text-[#3B82F6]">
+            <div className="p-2 bg-[#7f1d1d]/10 rounded-[4px] text-[#fca5a5]">
               <Database className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-4 flex items-center text-xs text-[#A7C7D9]">
+          <div className="mt-4 flex items-center text-xs text-[#a1a1aa]">
             <span className="text-green-400 font-mono mr-1.5">● Connected</span>
             <span>Local DB Storage</span>
           </div>
         </div>
 
-        <div id="stat-card-pending" className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-[#00E5FF]" />
+        <div id="stat-card-pending" className="bg-[#111113] border border-[#27272a] p-4 rounded-[4px] relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-[#7f1d1d]" />
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-xs uppercase tracking-[0.16em] text-[#6C8798]">Files Processing</p>
-              <h3 className="text-3xl font-semibold tracking-tight text-[#00E5FF] mt-1 font-mono">
+              <p className="text-xs uppercase tracking-[0.16em] text-[#71717a]">Files Processing</p>
+              <h3 className="text-3xl font-semibold tracking-tight text-[#fca5a5] mt-1 font-mono">
                 {(status?.queues.pending ?? 0) + (status?.queues.processing ?? 0)}
               </h3>
             </div>
-            <div className="p-2 bg-[#00E5FF]/10 rounded-[4px] text-[#00E5FF]">
+            <div className="p-2 bg-[#7f1d1d]/10 rounded-[4px] text-[#fca5a5]">
               <Activity className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-4 flex items-center text-xs text-[#A7C7D9]">
+          <div className="mt-4 flex items-center text-xs text-[#a1a1aa]">
             <span className="text-cyan-400 font-mono mr-1.5 animate-pulse">● {status?.queues.processing ?? 0} Active Workers</span>
             <span>In processing pipeline</span>
           </div>
         </div>
 
-        <div id="stat-card-review" className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-[#F59E0B]" />
+        <div id="stat-card-review" className="bg-[#111113] border border-[#27272a] p-4 rounded-[4px] relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-[#7f1d1d]" />
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-xs uppercase tracking-[0.16em] text-[#6C8798]">Docket Approvals</p>
-              <h3 className="text-3xl font-semibold tracking-tight text-[#F59E0B] mt-1 font-mono">
+              <p className="text-xs uppercase tracking-[0.16em] text-[#71717a]">Review Queue</p>
+              <h3 className="text-3xl font-semibold tracking-tight text-[#fca5a5] mt-1 font-mono">
                 {pendingReviews.length}
               </h3>
             </div>
-            <div className="p-2 bg-[#F59E0B]/10 rounded-[4px] text-[#F59E0B]">
+            <div className="p-2 bg-[#7f1d1d]/10 rounded-[4px] text-[#fca5a5]">
               <AlertTriangle className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-4 flex items-center text-xs text-[#A7C7D9]">
+          <div className="mt-4 flex items-center text-xs text-[#a1a1aa]">
             <span className="text-amber-400 font-semibold mr-1.5">{pendingReviews.filter(r => r.severity === "critical").length} Critical</span>
             <span>Needs human resolve</span>
           </div>
         </div>
 
-        <div id="stat-card-size" className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-[#22C55E]" />
+        <div id="stat-card-size" className="bg-[#111113] border border-[#27272a] p-4 rounded-[4px] relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-[#7f1d1d]" />
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-xs uppercase tracking-[0.16em] text-[#6C8798]">Storage Saved</p>
-              <h3 className="text-3xl font-semibold tracking-tight text-[#22C55E] mt-1 font-mono">
+              <p className="text-xs uppercase tracking-[0.16em] text-[#71717a]">Storage Saved</p>
+              <h3 className="text-3xl font-semibold tracking-tight text-[#fca5a5] mt-1 font-mono">
                 {(((status?.storage.savedBytes ?? 0) / 1024 / 1024)).toFixed(1)} MB
               </h3>
             </div>
-            <div className="p-2 bg-[#22C55E]/10 rounded-[4px] text-[#22C55E]">
+            <div className="p-2 bg-[#7f1d1d]/10 rounded-[4px] text-[#fca5a5]">
               <CheckCircle2 className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-4 flex items-center text-xs text-[#A7C7D9]">
+          <div className="mt-4 flex items-center text-xs text-[#a1a1aa]">
             <span className="text-green-400 font-semibold mr-1">
               -{(((status?.storage.savedBytes ?? 0) / (status?.storage.totalBytes ?? 1)) * 100).toFixed(0)}%
             </span>
@@ -110,31 +110,31 @@ export default function Dashboard({
 
       {/* Main Row: System state flowchart and resources health */}
       <div id="main-metrics-row" className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div id="metrics-flowchart-panel" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] lg:col-span-2 space-y-4">
-          <div className="flex justify-between items-center border-b border-[#183040] pb-3">
-            <h2 className="text-sm font-semibold text-[#E6F7FF] uppercase tracking-wider flex items-center gap-2">
-              <Box className="w-4 h-4 text-[#00E5FF]" /> Dynamic Document Pipeline State
+        <div id="metrics-flowchart-panel" className="bg-[#111113] border border-[#27272a] p-5 rounded-[4px] lg:col-span-2 space-y-4">
+          <div className="flex justify-between items-center border-b border-[#27272a] pb-3">
+            <h2 className="text-sm font-semibold text-[#f4f4f5] uppercase tracking-wider flex items-center gap-2">
+              <Box className="w-4 h-4 text-[#fca5a5]" /> Document Pipeline
             </h2>
-            <span className="text-xs font-mono text-[#00E5FF] bg-[#00E5FF]/10 px-2 py-0.5 rounded-[2px] uppercase">
-              Authoritative local automation
+            <span className="text-xs font-mono text-[#fca5a5] bg-[#7f1d1d]/10 px-2 py-0.5 rounded-[2px] uppercase">
+              Local-first automation
             </span>
           </div>
 
-          <p className="text-xs text-[#A7C7D9]">
-            The local document processing flow ensures state integrity. Active items progress asynchronously across twelve isolated processing modules.
+          <p className="text-xs text-[#a1a1aa]">
+            The local document flow keeps intake, extraction, classification, and review synchronized.
           </p>
 
           {/* Sequential flowchart diagram */}
           <div id="pipeline-timeline-flow" className="pt-4 pb-2">
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
               {[
-                { stage: "Ingest", desc: "Sync / Watch", color: "bg-blue-500", border: 'border-blue-500', active: true },
-                { stage: "Hash", desc: "SHA-256 Check", color: "bg-blue-500", border: 'border-blue-500', active: true },
-                { stage: "Dedupe", desc: "Vector Match", color: "bg-[#00E5FF]", border: 'border-[#00E5FF]', active: true, pulse: true },
-                { stage: "Extract", desc: "Parser Engine", color: "bg-gray-700", border: 'border-gray-700', active: false },
-                { stage: "Classify", desc: "MASTERd AI", color: "bg-gray-700", border: 'border-gray-700', active: false },
-                { stage: "Rename", desc: "Naming Rule", color: "bg-gray-700", border: 'border-gray-700', active: false },
-                { stage: "Storage", desc: "Local Sync", color: "bg-gray-700", border: 'border-gray-700', active: false },
+                { stage: "Ingest", desc: "Watch / Import", color: "bg-[#7f1d1d]", border: 'border-[#7f1d1d]', active: true },
+                { stage: "Hash", desc: "SHA-256 Check", color: "bg-[#7f1d1d]", border: 'border-[#7f1d1d]', active: true },
+                { stage: "Dedupe", desc: "Index Match", color: "bg-[#fca5a5]", border: 'border-[#fca5a5]', active: true, pulse: true },
+                { stage: "Extract", desc: "Parser Engine", color: "bg-[#27272a]", border: 'border-[#27272a]', active: false },
+                { stage: "Classify", desc: "Routing Rules", color: "bg-[#27272a]", border: 'border-[#27272a]', active: false },
+                { stage: "Rename", desc: "Naming Policy", color: "bg-[#27272a]", border: 'border-[#27272a]', active: false },
+                { stage: "Storage", desc: "Local Archive", color: "bg-[#27272a]", border: 'border-[#27272a]', active: false },
               ].map((item, idx) => (
                 <div key={idx} className="relative flex flex-col justify-between p-2.5 bg-[#05070A] border border-[#183040] rounded-[4px]">
                   <div>
@@ -147,7 +147,7 @@ export default function Dashboard({
                   </div>
                   {idx < 6 && (
                     <div className="hidden lg:block absolute top-1/2 -right-1.5 -translate-y-1/2 z-10 text-[#00E5FF]">
-                      <ArrowRight className="w-3.5 h-3.5 opacity-50" />
+                      <ArrowRight className="w-3.5 h-3.5 opacity-50 text-[#b91c1c]" />
                     </div>
                   )}
                 </div>
@@ -157,34 +157,34 @@ export default function Dashboard({
 
           <div className="flex justify-between items-center text-xs text-[#6C8798] pt-2">
             <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> Completed stage
+              <span className="w-2.5 h-2.5 rounded-full bg-[#7f1d1d] inline-block" /> Completed stage
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#00E5FF] inline-block animate-pulse" /> Actively running execution task
+              <span className="w-2.5 h-2.5 rounded-full bg-[#fca5a5] inline-block animate-pulse" /> Actively running execution task
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-gray-700 inline-block" /> Queued sequence code
+              <span className="w-2.5 h-2.5 rounded-full bg-[#27272a] inline-block" /> Queued sequence code
             </span>
           </div>
         </div>
 
         {/* Resources container */}
-        <div id="metrics-hardware-panel" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
-          <div className="border-b border-[#183040] pb-3">
-            <h2 className="text-sm font-semibold text-[#E6F7FF] uppercase tracking-wider flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-[#3B82F6]" /> Hardware Sandbox Health
+        <div id="metrics-hardware-panel" className="bg-[#111113] border border-[#27272a] p-5 rounded-[4px] space-y-4">
+          <div className="border-b border-[#27272a] pb-3">
+            <h2 className="text-sm font-semibold text-[#f4f4f5] uppercase tracking-wider flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-[#fca5a5]" /> Hardware Health
             </h2>
           </div>
 
           {/* CPU use */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-mono">
-              <span className="text-[#A7C7D9]">Local Engine CPU Thread Load</span>
-              <span className="text-[#3B82F6] font-semibold">{health?.cpuUsage ?? 0}%</span>
+              <span className="text-[#a1a1aa]">Local CPU load</span>
+              <span className="text-[#fca5a5] font-semibold">{health?.cpuUsage ?? 0}%</span>
             </div>
             <div className="h-2 bg-[#05070A] border border-[#183040] p-0.5 rounded-[4px] overflow-hidden">
               <motion.div 
-                className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-[2px]" 
+                className="h-full bg-gradient-to-r from-[#7f1d1d] to-[#fca5a5] rounded-[2px]" 
                 style={{ width: `${health?.cpuUsage ?? 15}%` }}
                 animate={{ width: `${health?.cpuUsage ?? 15}%` }}
                 transition={{ duration: 0.5 }}
@@ -195,12 +195,12 @@ export default function Dashboard({
           {/* Memory limit */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-mono">
-              <span className="text-[#A7C7D9]">Secure RAM Utilization</span>
-              <span className="text-[#00E5FF] font-semibold">{health?.memoryUsage ?? 0}%</span>
+              <span className="text-[#a1a1aa]">Memory utilization</span>
+              <span className="text-[#fca5a5] font-semibold">{health?.memoryUsage ?? 0}%</span>
             </div>
             <div className="h-2 bg-[#05070A] border border-[#183040] p-0.5 rounded-[4px] overflow-hidden">
               <motion.div 
-                className="h-full bg-[#00E5FF] rounded-[2px]"
+                className="h-full bg-[#7f1d1d] rounded-[2px]"
                 style={{ width: `${health?.memoryUsage ?? 40}%` }}
                 animate={{ width: `${health?.memoryUsage ?? 40}%` }}
                 transition={{ duration: 0.5 }}
@@ -211,8 +211,8 @@ export default function Dashboard({
           {/* Disk storage */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-mono">
-              <span className="text-[#A7C7D9]">Secure Disk Storage Left</span>
-              <span className="text-[#22C55E] font-semibold">
+              <span className="text-[#a1a1aa]">Disk storage left</span>
+              <span className="text-[#fca5a5] font-semibold">
                 {health ? (health.diskFreeBytes / 1024 / 1024 / 1024).toFixed(1) : 148} GB Free
               </span>
             </div>
@@ -221,11 +221,11 @@ export default function Dashboard({
             </div>
           </div>
 
-          <div className="bg-[#05070A] p-2.5 rounded-[4px] border border-[#183040] mt-4">
+          <div className="bg-[#09090b] p-2.5 rounded-[4px] border border-[#27272a] mt-4">
             <div className="flex items-center gap-2 text-xs">
-              <Lock className="w-3.5 h-3.5 text-[#22C55E]" />
-              <span className="text-[#A7C7D9] font-mono">Database Latency:</span>
-              <span className="text-[#E6F7FF] font-bold font-mono ml-auto">{health?.dbLatencyMs ?? 4} ms</span>
+              <Lock className="w-3.5 h-3.5 text-[#fca5a5]" />
+              <span className="text-[#a1a1aa] font-mono">Database Latency:</span>
+              <span className="text-[#f4f4f5] font-bold font-mono ml-auto">{health?.dbLatencyMs ?? 4} ms</span>
             </div>
           </div>
         </div>
