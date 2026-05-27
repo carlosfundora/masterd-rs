@@ -149,11 +149,11 @@ ARCH="$(uname -m)"
 case "${ARCH}" in
   x86_64|amd64)
     MEILI_PLATFORM="linux-amd64"
-    FALKOR_PLATFORM="linux-amd64"
+    FALKOR_WHEEL_PLATFORM="manylinux_2_17_x86_64"
     ;;
   aarch64|arm64)
     MEILI_PLATFORM="linux-aarch64"
-    FALKOR_PLATFORM="linux-aarch64"
+    FALKOR_WHEEL_PLATFORM="manylinux_2_17_aarch64"
     ;;
   *)
     printf "ERROR: unsupported installer architecture: %s\n" "${ARCH}" >&2
@@ -197,18 +197,67 @@ else
   printf "%b║%b  valkey-server already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
 fi
 
-# FalkorDB module (.so) — optional, silently skip if not available
-FALKOR_VERSION="v4.3.1"
+# FalkorDB module from official falkordb-bin wheels.
+# MASTERd uses Valkey as the server; the wheel is only used as a stable
+# distribution channel for the Redis-compatible FalkorDB module.
+FALKOR_BIN_VERSION="1.4.1"
 FALKOR_SO="${MOD_DIR}/falkordb.so"
+install_falkor_from_wheel() {
+  local wheel_dir="${ROOT_DIR}/target/falkordb-bin"
+  local metadata_json="${wheel_dir}/falkordb-bin-${FALKOR_BIN_VERSION}.json"
+  local wheel_file="${wheel_dir}/falkordb-bin-${FALKOR_BIN_VERSION}-${FALKOR_WHEEL_PLATFORM}.whl"
+  local wheel_url
+
+  mkdir -p "${wheel_dir}"
+  curl -fsSL "https://pypi.org/pypi/falkordb-bin/${FALKOR_BIN_VERSION}/json" -o "${metadata_json}"
+  wheel_url="$(FALKOR_WHEEL_PLATFORM="${FALKOR_WHEEL_PLATFORM}" python3 - "${metadata_json}" <<'PY'
+import json
+import os
+import sys
+
+platform = os.environ["FALKOR_WHEEL_PLATFORM"]
+metadata_path = sys.argv[1]
+preferred = ["cp312", "cp311", "cp310", "cp313"]
+with open(metadata_path, "r", encoding="utf-8") as fh:
+    urls = json.load(fh)["urls"]
+
+candidates = [u for u in urls if platform in u["filename"] and u["filename"].endswith(".whl")]
+for py_tag in preferred:
+    for candidate in candidates:
+        if f"-{py_tag}-{py_tag}-" in candidate["filename"]:
+            print(candidate["url"])
+            raise SystemExit(0)
+if candidates:
+    print(candidates[0]["url"])
+    raise SystemExit(0)
+raise SystemExit(f"no falkordb-bin wheel found for {platform}")
+PY
+)"
+
+  printf "%b║%b  Downloading FalkorDB binary wheel %s for %s...%b\n" "${RED}" "${CYAN}" "${FALKOR_BIN_VERSION}" "${FALKOR_WHEEL_PLATFORM}" "${RESET}"
+  curl -fsSL "${wheel_url}" -o "${wheel_file}"
+  FALKOR_WHEEL="${wheel_file}" FALKOR_SO="${FALKOR_SO}" python3 - <<'PY'
+import os
+import stat
+import zipfile
+
+wheel = os.environ["FALKOR_WHEEL"]
+module_dest = os.environ["FALKOR_SO"]
+with zipfile.ZipFile(wheel) as zf:
+    module_name = next(name for name in zf.namelist() if name.endswith("/falkordb.so"))
+    with zf.open(module_name) as src, open(module_dest, "wb") as dst:
+        dst.write(src.read())
+mode = os.stat(module_dest).st_mode
+os.chmod(module_dest, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+PY
+}
+
 if [[ ! -f "${FALKOR_SO}" ]]; then
-  FALKOR_URL="https://github.com/FalkorDB/FalkorDB/releases/download/${FALKOR_VERSION}/falkordb-${FALKOR_PLATFORM}.so"
-  printf "%b║%b  Attempting FalkorDB module download...%b\n" "${RED}" "${CYAN}" "${RESET}"
-  if curl -fsSL "${FALKOR_URL}" -o "${FALKOR_SO}" 2>/dev/null; then
-    printf "%b║%b  FalkorDB module installed.%b\n" "${RED}" "${GREEN}" "${RESET}"
-  else
-    printf "%b║%b  FalkorDB not available for this platform — graph queries will be disabled.%b\n" "${RED}" "${YELLOW}" "${RESET}"
-    /usr/bin/rm -f "${FALKOR_SO}"
-  fi
+  printf "%b║%b  Installing FalkorDB module for embedded graph support...%b\n" "${RED}" "${CYAN}" "${RESET}"
+  install_falkor_from_wheel
+  printf "%b║%b  FalkorDB module installed for Valkey loadmodule.%b\n" "${RED}" "${GREEN}" "${RESET}"
+else
+  printf "%b║%b  FalkorDB module already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
 fi
 
 # ── Frontend build ─────────────────────────────────────────────────────────
