@@ -26,3 +26,45 @@ body {
   background: rgba(185, 28, 28, 0.35);
   color: #fff;
 }
+
+select {
+  background-color: #111113;
+  color: #f4f4f5;
+  border-color: #27272a;
+}
+
+select option {
+  background-color: #09090b;
+  color: #f4f4f5;
+}
+
+/* Keep legacy blue/cyan utility classes from breaking the MASTERd palette. */
+.text-cyan-400,
+.text-cyan-500,
+.text-blue-400,
+.text-blue-500,
+.text-purple-400,
+.text-orange-400,
+.text-yellow-400 {
+  color: #fca5a5 !important;
+}
+
+.bg-cyan-400,
+.bg-cyan-500,
+.bg-blue-400,
+.bg-blue-500,
+.bg-purple-400,
+.bg-orange-400,
+.bg-yellow-400 {
+  background-color: rgba(127, 29, 29, 0.18) !important;
+}
+
+.border-cyan-400,
+.border-cyan-500,
+.border-blue-400,
+.border-blue-500,
+.border-purple-400,
+.border-orange-400,
+.border-yellow-400 {
+  border-color: rgba(127, 29, 29, 0.35) !important;
+}

@@ -171,9 +171,9 @@ export default function Documents({
         return <FileSpreadsheet className="w-4 h-4 text-green-400" />;
       case "json":
       case "txt":
-        return <FileCode className="w-4 h-4 text-blue-400" />;
+        return <FileCode className="w-4 h-4 text-[#fca5a5]" />;
       default:
-        return <FileText className="w-4 h-4 text-cyan-400" />;
+        return <FileText className="w-4 h-4 text-[#fca5a5]" />;
     }
   };
 
@@ -201,7 +201,7 @@ export default function Documents({
                 placeholder="Search across file index, OCR text, tags..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className="w-full bg-[#05070A] border border-[#183040] pl-9 pr-4 py-1.5 rounded-[4px] text-xs font-mono text-[#E6F7FF] focus:outline-none focus:border-[#00E5FF] placeholder-[#3E5360]"
+                className="w-full bg-[#09090b] border border-[#27272a] pl-9 pr-4 py-1.5 rounded-[4px] text-xs font-mono text-[#f4f4f5] focus:outline-none focus:border-[#b91c1c] placeholder-[#71717a]"
               />
               {searchTerm && (
                 <button 
@@ -218,7 +218,7 @@ export default function Documents({
                 id="filter-category-selector"
                 value={catFilter}
                 onChange={e => setCatFilter(e.target.value)}
-                className="bg-[#05070A] border border-[#183040] text-xs px-2.5 py-1.5 rounded-[4px] font-mono text-[#A7C7D9] focus:outline-none focus:border-[#00E5FF]"
+                className="bg-[#09090b] border border-[#27272a] text-xs px-2.5 py-1.5 rounded-[4px] font-mono text-[#f4f4f5] focus:outline-none focus:border-[#b91c1c]"
               >
                 <option value="">-- Classification Category --</option>
                 {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
@@ -228,7 +228,7 @@ export default function Documents({
                 id="filter-status-selector"
                 value={statusFilter}
                 onChange={e => setStatusFilter(e.target.value)}
-                className="bg-[#05070A] border border-[#183040] text-xs px-2.5 py-1.5 rounded-[4px] font-mono text-[#A7C7D9] focus:outline-none focus:border-[#00E5FF]"
+                className="bg-[#09090b] border border-[#27272a] text-xs px-2.5 py-1.5 rounded-[4px] font-mono text-[#f4f4f5] focus:outline-none focus:border-[#b91c1c]"
               >
                 <option value="">-- Processing State --</option>
                 <option value="needs_review">Needs Review / Manual Action</option>
@@ -240,7 +240,7 @@ export default function Documents({
                 id="filter-duplicate-selector"
                 value={dupeFilter}
                 onChange={e => setDupeFilter(e.target.value)}
-                className="bg-[#05070A] border border-[#183040] text-xs px-2.5 py-1.5 rounded-[4px] font-mono text-[#A7C7D9] focus:outline-none focus:border-[#00E5FF]"
+                className="bg-[#09090b] border border-[#27272a] text-xs px-2.5 py-1.5 rounded-[4px] font-mono text-[#f4f4f5] focus:outline-none focus:border-[#b91c1c]"
               >
                 <option value="">-- Duplicate Check --</option>
                 <option value="unique">Unique File</option>
@@ -281,7 +281,7 @@ export default function Documents({
                         key={doc.id}
                         onClick={() => setSelectedDocument(doc)}
                         className={`hover:bg-[#101827]/40 cursor-pointer transition-colors ${
-                          isSelected ? "bg-[#3B82F6]/10 border-l-2 border-l-[#3B82F6]" : ""
+                          isSelected ? "bg-[#7f1d1d]/10 border-l-2 border-l-[#7f1d1d]" : ""
                         }`}
                       >
                         <td className="py-3 px-4 space-y-1 max-w-xs sm:max-w-md">
@@ -292,7 +292,7 @@ export default function Documents({
                             </span>
                           </div>
                           {doc.suggestedName && doc.suggestedName !== doc.currentName && (
-                            <div className="text-[10px] text-[#00E5FF] font-mono flex items-center gap-1">
+                            <div className="text-[10px] text-[#fca5a5] font-mono flex items-center gap-1">
                               <CornerDownRight className="w-3 h-3 text-[#3E5360]" />
                               <span>AI suggests: {doc.suggestedName}</span>
                             </div>
@@ -333,7 +333,7 @@ export default function Documents({
                           <span className={`px-2 py-0.5 rounded-[2px] font-mono text-[10px] uppercase font-bold tracking-tight inline-block ${
                             doc.processingStatus === "complete" ? "bg-green-500/10 text-green-400 border border-green-500/20" :
                             doc.processingStatus === "needs_review" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
-                            doc.processingStatus === "processing" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 animate-pulse" :
+                            doc.processingStatus === "processing" ? "bg-[#7f1d1d]/10 text-[#fca5a5] border border-[#7f1d1d]/20 animate-pulse" :
                             "bg-red-500/10 text-red-500 border border-red-500/20"
                           }`}>
                             {doc.processingStatus === "needs_review" ? "REVIEW REQ" : doc.processingStatus}
@@ -351,14 +351,14 @@ export default function Documents({
                             <button
                               onClick={() => setSelectedDocument(doc)}
                               title="View Document Details"
-                              className="p-1 text-[#6C8798] hover:text-[#00E5FF] hover:bg-[#00E5FF]/5 rounded-[4px]"
+                              className="p-1 text-[#6C8798] hover:text-[#fca5a5] hover:bg-[#7f1d1d]/5 rounded-[4px]"
                             >
                               <Eye className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleReprocess(doc.id)}
                               title="Reprocess Extractor pipeline"
-                              className="p-1 text-[#6C8798] hover:text-[#3B82F6] hover:bg-[#3B82F6]/5 rounded-[4px]"
+                              className="p-1 text-[#6C8798] hover:text-[#fca5a5] hover:bg-[#7f1d1d]/5 rounded-[4px]"
                             >
                               <RefreshCw className="w-4 h-4" />
                             </button>
@@ -390,8 +390,8 @@ export default function Documents({
 
           {/* Header Title */}
           <div className="space-y-1.5 pr-6 border-b border-[#183040] pb-3">
-            <span className="text-[10px] uppercase font-mono tracking-widest text-[#00E5FF] flex items-center gap-1.5">
-              <Sparkles className="w-3 h-3 text-[#00E5FF]" /> Pipeline Record Intel
+            <span className="text-[10px] uppercase font-mono tracking-widest text-[#fca5a5] flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3 text-[#fca5a5]" /> Pipeline Record Intel
             </span>
             <div className="flex items-center gap-2">
               {getFileIcon(selectedDocument.extension)}
@@ -421,7 +421,7 @@ export default function Documents({
                 onClick={() => setInspectorTab(tab.id as any)}
                 className={`px-2 py-1 rounded-[2px] cursor-pointer whitespace-nowrap transition-colors ${
                   inspectorTab === tab.id 
-                    ? "text-[#00E5FF] bg-[#183040]/70 font-semibold" 
+                    ? "text-[#fca5a5] bg-[#27272a]/70 font-semibold" 
                     : "text-[#6C8798] hover:text-[#E6F7FF]"
                 }`}
               >
@@ -449,7 +449,7 @@ export default function Documents({
                     <span className="text-[#E6F7FF] text-right truncate text-[10px]">{selectedDocument.mimeType}</span>
                     
                     <span className="text-[#A7C7D9]">DB Index:</span>
-                    <span className="text-[#00E5FF] text-right">{selectedDocument.id}</span>
+                    <span className="text-[#fca5a5] text-right">{selectedDocument.id}</span>
                   </div>
                 </div>
 
@@ -490,11 +490,11 @@ export default function Documents({
                       value={customTagInput}
                       onChange={e => setCustomTagInput(e.target.value)}
                       onKeyDown={e => { if (e.key === "Enter") handleAddTag(selectedDocument); }}
-                      className="flex-1 bg-[#101827]/80 border border-[#183040] text-[11px] font-mono px-2 py-1 rounded-[2px] text-[#E6F7FF] focus:outline-none focus:border-[#00E5FF]"
+                      className="flex-1 bg-[#101827]/80 border border-[#183040] text-[11px] font-mono px-2 py-1 rounded-[2px] text-[#E6F7FF] focus:outline-none focus:border-[#b91c1c]"
                     />
                     <button 
                       onClick={() => handleAddTag(selectedDocument)}
-                      className="px-2.5 py-1 text-[11px] bg-[#3B82F6] hover:bg-[#3B82F6]/95 text-white font-mono rounded-[4px]"
+                      className="px-2.5 py-1 text-[11px] bg-[#b91c1c] hover:bg-[#991b1b] text-white font-mono rounded-[4px]"
                     >
                       Add
                     </button>
@@ -509,9 +509,9 @@ export default function Documents({
                 <div className="bg-[#05070A] border border-[#183040]/60 p-3 rounded-[4px] min-h-[140px] flex flex-col justify-between">
                   <div>
                     <h4 className="font-semibold text-[#A7C7D9] flex items-center gap-1.5 text-xs mb-2">
-                      <Sparkles className="w-3.5 h-3.5 text-[#00E5FF]" /> AI Document Digest Summary
+                      <Sparkles className="w-3.5 h-3.5 text-[#fca5a5]" /> AI Document Digest Summary
                     </h4>
-                    <p className="text-xs text-[#E6F7FF] leading-relaxed italic bg-blue-500/5 p-3 rounded-[4px]">
+                    <p className="text-xs text-[#E6F7FF] leading-relaxed italic bg-[#7f1d1d]/5 p-3 rounded-[4px]">
                       &quot;{selectedDocument.summary || "No automated summary is registered for this record. Trigger reprocessing to evaluate summary nodes."}&quot;
                     </p>
                   </div>
@@ -527,7 +527,7 @@ export default function Documents({
                   </h4>
                   <div className="aspect-video relative bg-[#0B1018] border border-[#183040] rounded-[4px] mt-2 flex flex-col items-center justify-center overflow-hidden">
                     <div className="absolute inset-0 bg-[radial-gradient(#1e3040_1px,transparent_1px)] [background-size:12px_12px] opacity-20" />
-                    <FileText className="w-10 h-10 text-cyan-400/40 mb-1" />
+                    <FileText className="w-10 h-10 text-[#fca5a5]/40 mb-1" />
                     <span className="font-mono text-[9px] text-[#6C8798] uppercase">Secure local visual sandbox</span>
                   </div>
                 </div>
@@ -540,14 +540,14 @@ export default function Documents({
                 <div className="bg-[#05070A] border border-[#183040]/60 p-3 rounded-[4px] space-y-2">
                   <div className="flex justify-between items-center">
                     <HeaderLabel>Extracted Entities</HeaderLabel>
-                    <span className="text-[10px] font-mono text-cyan-400">OCR Local Engine</span>
+                    <span className="text-[10px] font-mono text-[#fca5a5]">OCR Local Engine</span>
                   </div>
                   
                   <div className="flex flex-wrap gap-1.5">
                     {entities.map((ent, i) => (
                       <span 
                         key={i}
-                        className="bg-cyan-500/10 text-cyan-400 border border-cyan-400/20 rounded-[2px] p-1 text-[10px] font-mono inline-flex items-center gap-1"
+                        className="bg-[#7f1d1d]/10 text-[#fca5a5] border border-[#7f1d1d]/20 rounded-[2px] p-1 text-[10px] font-mono inline-flex items-center gap-1"
                       >
                         <span className="font-bold uppercase text-[8px] tracking-wider text-[#6C8798] bg-[#05070A] px-1 rounded-[2px]">
                           {ent.label}
@@ -582,11 +582,11 @@ export default function Documents({
                       <div key={i} className="space-y-1">
                         <div className="flex justify-between text-[11px] font-mono">
                           <span className="font-semibold text-[#E6F7FF]">{cand.category}</span>
-                          <span className="text-cyan-400">{(cand.confidence * 100).toFixed(0)}%</span>
+                          <span className="text-[#fca5a5]">{(cand.confidence * 100).toFixed(0)}%</span>
                         </div>
                         <div className="h-1.5 bg-[#0B1018] border border-[#183040] rounded-[2px] overflow-hidden p-0.5">
                           <div 
-                            className="h-full bg-cyan-400 rounded-[1px]" 
+                            className="h-full bg-[#fca5a5] rounded-[1px]" 
                             style={{ width: `${cand.confidence * 100}%` }}
                           />
                         </div>
@@ -620,13 +620,13 @@ export default function Documents({
                     </div>
                   </div>
 
-                  <div className="p-2.5 bg-[#00E5FF]/5 rounded-[4px] border border-[#00E5FF]/30 space-y-1.5">
-                    <span className="text-[9px] font-mono uppercase text-[#00E5FF]">Proposed Target Filename</span>
+                  <div className="p-2.5 bg-[#7f1d1d]/5 rounded-[4px] border border-[#7f1d1d]/30 space-y-1.5">
+                    <span className="text-[9px] font-mono uppercase text-[#fca5a5]">Proposed Target Filename</span>
                     <input
                       type="text"
                       value={editableRenameVal}
                       onChange={e => setEditableRenameVal(e.target.value)}
-                      className="w-full bg-[#05070A] border border-[#183040] font-mono text-xs p-1.5 rounded-[4px] text-white focus:outline-none focus:border-[#00E5FF]"
+                      className="w-full bg-[#05070A] border border-[#183040] font-mono text-xs p-1.5 rounded-[4px] text-white focus:outline-none focus:border-[#b91c1c]"
                     />
                   </div>
 
@@ -712,7 +712,7 @@ export default function Documents({
                     {documentAudit.map(log => (
                       <div key={log.id} className="p-2 bg-[#05070A] border border-[#183040]/50 rounded-[4px] space-y-1 text-[11px]">
                         <div className="flex justify-between items-center font-mono">
-                          <span className="text-cyan-400 font-bold uppercase text-[9px] bg-cyan-400/10 px-1 rounded-[1px]">
+                          <span className="text-[#fca5a5] font-bold uppercase text-[9px] bg-[#7f1d1d]/10 px-1 rounded-[1px]">
                             {log.action}
                           </span>
                           <span className="text-[#6C8798] text-[9px]">
@@ -742,7 +742,7 @@ export default function Documents({
               <div id="inspector-tab-raw" className="space-y-3">
                 <HeaderLabel>Raw Document Record JSON Metadata</HeaderLabel>
                 <div className="bg-[#05070A] p-2.5 rounded-[4px] border border-[#183040]">
-                  <pre className="text-[9px] font-mono text-[#00E5FF] overflow-x-auto h-72 pr-2 scrollbar-thin">
+                  <pre className="text-[9px] font-mono text-[#fca5a5] overflow-x-auto h-72 pr-2 scrollbar-thin">
                     {JSON.stringify(selectedDocument, null, 2)}
                   </pre>
                 </div>

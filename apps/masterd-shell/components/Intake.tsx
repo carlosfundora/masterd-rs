@@ -276,7 +276,7 @@ export default function Intake({
                 <tr key={item.id} className="hover:bg-[#101827]/40 bg-[#0B1018] transition-colors">
                   <td className="py-3 px-4 space-y-1">
                     <div className="flex items-center gap-2 text-[#E6F7FF]">
-                      <FileText className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <FileText className="w-3.5 h-3.5 text-[#fca5a5] shrink-0" />
                       <span className="font-semibold truncate max-w-xs">{item.fileName}</span>
                     </div>
                     <div className="text-[10px] text-[#6C8798] truncate max-w-md break-all" title={item.path}>
@@ -291,7 +291,7 @@ export default function Intake({
                       <span className={`px-1.5 py-0.2 rounded-[1.5px] font-bold text-[9px] uppercase ${
                         item.status === "complete" ? "bg-green-500/10 text-green-400" :
                         item.status === "error" ? "bg-red-500/10 text-red-400" :
-                        "bg-[#00E5FF]/10 text-[#00E5FF]"
+                        "bg-[#7f1d1d]/10 text-[#fca5a5]"
                       }`}>
                         {item.status}
                       </span>
@@ -304,7 +304,7 @@ export default function Intake({
                         className={`h-full rounded-[1px] transition-all duration-300 ${
                           item.status === "complete" ? "bg-green-400" :
                           item.status === "error" ? "bg-red-400" :
-                          "bg-[#00E5FF]"
+                          "bg-[#fca5a5]"
                         }`}
                         style={{ width: `${item.progress}%` }}
                       />

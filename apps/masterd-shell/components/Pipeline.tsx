@@ -61,7 +61,7 @@ export default function Pipeline({
         
         {/* Worker 1 Console Status */}
         <div className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] space-y-3 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-[#00E5FF]" />
+          <div className="absolute top-0 left-0 w-1 h-full bg-[#b91c1c]" />
           <div className="flex justify-between items-center text-xs">
             <span className="font-mono text-[#6C8798]">THREAD PROCESSOR 01</span>
             <span className="text-green-400 font-mono flex items-center gap-1.5 font-bold">
@@ -70,7 +70,7 @@ export default function Pipeline({
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-[#00E5FF]/10 text-[#00E5FF] rounded-[4px]">
+            <div className="p-2.5 bg-[#7f1d1d]/10 text-[#fca5a5] rounded-[4px]">
               <Cpu className="w-5 h-5" />
             </div>
             <div>
@@ -87,7 +87,7 @@ export default function Pipeline({
 
         {/* Worker 2 Console Status */}
         <div className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] space-y-3 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-[#3B82F6]" />
+          <div className="absolute top-0 left-0 w-1 h-full bg-[#7f1d1d]" />
           <div className="flex justify-between items-center text-xs">
             <span className="font-mono text-[#6C8798]">THREAD PROCESSOR 02</span>
             <span className="text-green-400 font-mono flex items-center gap-1.5 font-bold">
@@ -96,7 +96,7 @@ export default function Pipeline({
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-[#3B82F6]/10 text-[#3B82F6] rounded-[4px]">
+            <div className="p-2.5 bg-[#7f1d1d]/10 text-[#fca5a5] rounded-[4px]">
               <Cpu className="w-5 h-5" />
             </div>
             <div>
@@ -115,13 +115,13 @@ export default function Pipeline({
         <div className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] flex flex-col justify-between">
           <div>
             <h4 className="text-xs uppercase font-mono tracking-wider font-bold text-[#6C8798] flex items-center gap-1.5">
-              <Workflow className="w-4 h-4 text-[#00E5FF]" /> Local Worker Sandbox
+              <Workflow className="w-4 h-4 text-[#fca5a5]" /> Local Worker Sandbox
             </h4>
             <p className="text-[11px] text-[#A7C7D9] mt-2.5 leading-relaxed">
               MASTERd utilizes standard concurrent worker loops running isolated within browser sandbox sandboxes. No personal data ever exits your system.
             </p>
           </div>
-          <div className="text-[10px] text-cyan-400 font-mono border-t border-[#183040] pt-2 mt-2">
+          <div className="text-[10px] text-[#fca5a5] font-mono border-t border-[#183040] pt-2 mt-2">
             Active Core Threads: 2 / Memory Lock: Approved
           </div>
         </div>
@@ -135,7 +135,7 @@ export default function Pipeline({
         <div className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] lg:col-span-3 space-y-4 flex flex-col">
           <div className="border-b border-[#183040] pb-3 flex justify-between items-center">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-              <List className="w-4 h-4 text-[#00E5FF]" /> Active Pipeline Worker Jobs
+              <List className="w-4 h-4 text-[#fca5a5]" /> Active Pipeline Worker Jobs
             </h2>
           </div>
 
@@ -157,7 +157,7 @@ export default function Pipeline({
                       key={job.id} 
                       onClick={() => setSelectedJobId(job.id)}
                       className={`hover:bg-[#101827]/40 cursor-pointer transition-colors ${
-                        isSelected ? "bg-[#3B82F6]/10 border-l border-[#3B82F6]" : ""
+                        isSelected ? "bg-[#7f1d1d]/10 border-l border-[#7f1d1d]" : ""
                       }`}
                     >
                       <td className="py-3 px-4">
@@ -167,7 +167,7 @@ export default function Pipeline({
                         <div className="text-[10px] text-[#6C8798] font-mono">ID: {job.id}</div>
                       </td>
                       <td className="py-3 px-4">
-                        <span className="text-[10px] font-mono text-[#00E5FF] bg-[#00E5FF]/5 border border-[#00E5FF]/20 px-1.5 py-0.5 rounded-[2px] uppercase">
+                        <span className="text-[10px] font-mono text-[#fca5a5] bg-[#7f1d1d]/5 border border-[#7f1d1d]/20 px-1.5 py-0.5 rounded-[2px] uppercase">
                           {job.stage}
                         </span>
                       </td>
@@ -176,7 +176,7 @@ export default function Pipeline({
                           <span className={`${
                             job.status === "complete" ? "text-green-400" :
                             job.status === "error" ? "text-red-400" :
-                            "text-cyan-400"
+                            "text-[#fca5a5]"
                           }`}>{job.status}</span>
                           <span>{job.progress}%</span>
                         </div>
@@ -184,7 +184,7 @@ export default function Pipeline({
                           <div 
                             className={`h-full rounded-[1px] ${
                               job.status === "complete" ? "bg-green-400" :
-                              job.status === "error" ? "bg-red-400" : "bg-cyan-400"
+                              job.status === "error" ? "bg-red-400" : "bg-[#fca5a5]"
                             }`}
                             style={{ width: `${job.progress}%` }}
                           />
@@ -208,7 +208,7 @@ export default function Pipeline({
                         ) : (
                           <button
                             onClick={() => setSelectedJobId(job.id)}
-                            className="p-1 px-2 text-[#6C8798] hover:text-[#00E5FF] text-[10px] font-mono flex items-center gap-1 ml-auto"
+                            className="p-1 px-2 text-[#6C8798] hover:text-[#fca5a5] text-[10px] font-mono flex items-center gap-1 ml-auto"
                           >
                             <Terminal className="w-3.5 h-3.5" /> Log
                           </button>
@@ -241,8 +241,8 @@ export default function Pipeline({
               <div className="p-2.5 bg-[#05070A] border border-[#183040] rounded-[4px] font-mono text-[10px] grid grid-cols-2 gap-2 text-[#A7C7D9]">
                 <div>File Target: <span className="text-[#E6F7FF] font-semibold">{selectedJob.fileName}</span></div>
                 <div>Worker Engine: <span className="text-[#E6F7FF]">{selectedJob.workerId || "unassigned"}</span></div>
-                <div>Workflow Stage: <span className="text-[#00E5FF] uppercase font-bold">{selectedJob.stage}</span></div>
-                <div>Operations Check: <span className={`${selectedJob.status === "complete" ? "text-green-400" : "text-cyan-400"}`}>{selectedJob.status}</span></div>
+                <div>Workflow Stage: <span className="text-[#fca5a5] uppercase font-bold">{selectedJob.stage}</span></div>
+                <div>Operations Check: <span className={`${selectedJob.status === "complete" ? "text-green-400" : "text-[#fca5a5]"}`}>{selectedJob.status}</span></div>
               </div>
 
               {/* Terminal list logs */}
@@ -257,7 +257,7 @@ export default function Pipeline({
                     <span className={`shrink-0 ${
                       log.level === "error" ? "text-red-400" :
                       log.level === "warning" ? "text-amber-400" :
-                      log.level === "debug" ? "text-purple-400" : "text-green-400"
+                      log.level === "debug" ? "text-[#fca5a5]" : "text-green-400"
                     }`}>
                       [{log.level.toUpperCase()}]
                     </span>
@@ -265,7 +265,7 @@ export default function Pipeline({
                   </div>
                 ))}
                 {selectedJob.status === "running" && (
-                  <div className="text-cyan-300 font-bold animate-pulse text-[11px] mt-2">
+                  <div className="text-[#fca5a5] font-bold animate-pulse text-[11px] mt-2">
                     █ Worker pipeline process active... awaiting events...
                   </div>
                 )}

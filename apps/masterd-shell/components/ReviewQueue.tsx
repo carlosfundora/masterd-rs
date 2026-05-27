@@ -95,7 +95,7 @@ export default function ReviewQueue({
       case "warning":
         return <AlertTriangle className="w-4 h-4 text-amber-500" />;
       default:
-        return <BadgeInfo className="w-4 h-4 text-[#3B82F6]" />;
+        return <BadgeInfo className="w-4 h-4 text-[#fca5a5]" />;
     }
   };
 
@@ -116,7 +116,7 @@ export default function ReviewQueue({
         <div className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] lg:col-span-3 space-y-4 flex flex-col min-h-[450px]">
           <div className="border-b border-[#183040] pb-3 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-              <CheckSquare className="w-4 h-4 text-[#00E5FF]" /> Human Intelligence Docket Queue
+              <CheckSquare className="w-4 h-4 text-[#fca5a5]" /> Human Intelligence Docket Queue
             </h2>
 
             {/* Filter toolbar */}
@@ -124,7 +124,7 @@ export default function ReviewQueue({
               <button
                 onClick={() => setSeverityFilter("")}
                 className={`px-2 py-0.5 rounded-[2px] border ${
-                  severityFilter === "" ? "border-[#00E5FF] text-[#00E5FF] bg-[#00E5FF]/5" : "border-[#183040] text-[#6C8798]"
+                  severityFilter === "" ? "border-[#b91c1c] text-[#fca5a5] bg-[#7f1d1d]/5" : "border-[#183040] text-[#6C8798]"
                 }`}
               >
                 ALL ({pendingReviews.length})
@@ -167,7 +167,7 @@ export default function ReviewQueue({
                     }}
                     className={`p-3.5 bg-[#05070A] border rounded-[4px] cursor-pointer transition-colors space-y-2 ${
                       isSelected 
-                        ? "border-[#3B82F6] bg-[#3B82F6]/5" 
+                        ? "border-[#7f1d1d] bg-[#7f1d1d]/5" 
                         : "border-[#183040] hover:border-[#28576C]"
                     }`}
                   >
@@ -189,7 +189,7 @@ export default function ReviewQueue({
 
                     <div className="flex justify-between items-center text-[10px] font-mono border-t border-[#183040]/30 pt-1.5 mt-1 text-[#6C8798]">
                       <span>Trigger Core: {review.reason.replace(/_/g, " ")}</span>
-                      <span className="text-[#3B82F6] hover:underline" onClick={currentTabNavigate}>
+                      <span className="text-[#fca5a5] hover:underline" onClick={currentTabNavigate}>
                         Inspect file →
                       </span>
                     </div>
@@ -204,7 +204,7 @@ export default function ReviewQueue({
         <div id="review-panel-actions" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] lg:col-span-2 flex flex-col h-[510px]">
           <div className="border-b border-[#183040] pb-3 flex justify-between items-center shrink-0">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2 font-mono">
-              <Sliders className="w-4 h-4 text-[#00E5FF]" /> Decisional Panel
+              <Sliders className="w-4 h-4 text-[#fca5a5]" /> Decisional Panel
             </h2>
           </div>
 
@@ -216,7 +216,7 @@ export default function ReviewQueue({
                 <div className="p-3 bg-[#05070A] border border-[#183040] rounded-[4px] space-y-2 font-mono text-[11px]">
                   <div className="text-[10px] uppercase font-bold text-[#6C8798]">Target Document Association</div>
                   <div className="flex items-center gap-2 text-[#E6F7FF] font-semibold truncate">
-                    <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                    <FileText className="w-3.5 h-3.5 text-[#fca5a5]" />
                     <span className="truncate">{matchedDocument?.currentName}</span>
                   </div>
                   <div className="text-[10px] text-[#A7C7D9] truncate">
@@ -241,8 +241,8 @@ export default function ReviewQueue({
                     </div>
 
                     {/* Proposed changes */}
-                    <div className="p-2.5 bg-[#00E5FF]/5 border border-[#00E5FF]/20 rounded-[4px]">
-                      <span className="text-[9px] uppercase font-mono tracking-wider text-[#00E5FF]">Proposed Target State:</span>
+                    <div className="p-2.5 bg-[#7f1d1d]/5 border border-[#7f1d1d]/20 rounded-[4px]">
+                      <span className="text-[9px] uppercase font-mono tracking-wider text-[#fca5a5]">Proposed Target State:</span>
                       
                       {isEditingValue ? (
                         <div className="mt-1 flex gap-1.5">
@@ -250,7 +250,7 @@ export default function ReviewQueue({
                             type="text" 
                             value={customEditVal} 
                             onChange={e => setCustomEditVal(e.target.value)}
-                            className="bg-[#05070A] border border-[#00E5FF] text-xs font-mono p-1 rounded-[2px] flex-1 text-white focus:outline-none"
+                            className="bg-[#05070A] border border-[#b91c1c] text-xs font-mono p-1 rounded-[2px] flex-1 text-white focus:outline-none"
                           />
                           <button 
                             onClick={handleSaveEditResolve}
@@ -260,7 +260,7 @@ export default function ReviewQueue({
                           </button>
                         </div>
                       ) : (
-                        <pre className="text-[10px] font-mono text-cyan-400 mt-1 break-all truncate font-bold flex justify-between items-center bg-black/10 py-1 px-1.5 rounded-[2px]">
+                        <pre className="text-[10px] font-mono text-[#fca5a5] mt-1 break-all truncate font-bold flex justify-between items-center bg-black/10 py-1 px-1.5 rounded-[2px]">
                           <span>
                             {selectedReview.proposedAction.type === "classify" 
                               ? `Classification: "${selectedReview.proposedAction.after?.category || ''}"`

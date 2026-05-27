@@ -163,7 +163,7 @@ export default function Rules({
         <div id="rule-builder-panel" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
           <div className="border-b border-[#183040] pb-3">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-[#00E5FF]" /> Automation Rule Architect
+              <Sliders className="w-4 h-4 text-[#fca5a5]" /> Automation Rule Architect
             </h2>
           </div>
 
@@ -177,7 +177,7 @@ export default function Rules({
                 placeholder="E.g., Autotag expense invoices"
                 value={ruleName}
                 onChange={e => setRuleName(e.target.value)}
-                className="w-full bg-[#05070A] border border-[#183040] p-2 rounded-[4px] text-xs font-mono text-white focus:outline-none focus:border-[#00E5FF]"
+                className="w-full bg-[#09090b] border border-[#27272a] p-2 rounded-[4px] text-xs font-mono text-white focus:outline-none focus:border-[#b91c1c]"
               />
             </div>
 
@@ -223,7 +223,7 @@ export default function Rules({
 
             {/* IF Conditions block */}
             <div className="bg-[#05070A] p-3 border border-[#183040] rounded-[4px] space-y-2">
-              <span className="text-[9px] uppercase font-mono tracking-widest text-[#00E5FF]">IF Condition Met:</span>
+              <span className="text-[9px] uppercase font-mono tracking-widest text-[#fca5a5]">IF Condition Met:</span>
               <div className="grid grid-cols-1 gap-2 font-mono text-[11px]">
                 <div className="flex gap-1">
                   <select 
@@ -288,7 +288,7 @@ export default function Rules({
 
             <button
               type="submit"
-              className="w-full py-2 bg-[#3B82F6] hover:bg-blue-600 border border-[#3B82F6] text-white font-mono font-bold rounded-[4px] cursor-pointer flex items-center justify-center gap-1 text-[11px]"
+              className="w-full py-2 bg-[#b91c1c] hover:bg-[#991b1b] border border-[#b91c1c] text-white font-mono font-bold rounded-[4px] cursor-pointer flex items-center justify-center gap-1 text-[11px]"
             >
               <Plus className="w-4 h-4" /> Deploy Active Trigger-Rule
             </button>
@@ -299,7 +299,7 @@ export default function Rules({
         <div id="rules-registry-list" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4 flex flex-col h-[525px] overflow-hidden">
           <div className="border-b border-[#183040] pb-3">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-              <Workflow className="w-4 h-4 text-[#3B82F6]" /> Trigger Rules Registry
+              <Workflow className="w-4 h-4 text-[#fca5a5]" /> Trigger Rules Registry
             </h2>
           </div>
 
@@ -317,7 +317,7 @@ export default function Rules({
                 <div className="flex justify-between items-start gap-4">
                   <div className="space-y-0.5 min-w-0">
                     <h3 className="text-xs font-semibold text-[#E6F7FF] truncate flex items-center gap-1">
-                      <ChevronRight className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <ChevronRight className="w-3.5 h-3.5 text-[#fca5a5] shrink-0" />
                       {rule.name}
                     </h3>
                     {rule.description && (
@@ -326,7 +326,7 @@ export default function Rules({
                   </div>
                   <button 
                     onClick={() => handleToggleRule(rule)}
-                    className="text-[#6C8798] hover:text-[#00E5FF] shrink-0"
+                    className="text-[#6C8798] hover:text-[#fca5a5] shrink-0"
                   >
                     {rule.enabled ? (
                       <ToggleRight className="w-7 h-7 text-green-400" />
@@ -339,7 +339,7 @@ export default function Rules({
                 {/* IF - THEN conditions summary labels */}
                 <div className="p-2 bg-[#0B1018] rounded-[2px] border border-[#183040]/50 space-y-1 font-mono text-[10px] text-[#6C8798]">
                   <div className="flex items-start gap-1">
-                    <span className="text-cyan-400 font-bold shrink-0">IF:</span>
+                    <span className="text-[#fca5a5] font-bold shrink-0">IF:</span>
                     <span className="truncate text-[#A7C7D9]" title={rule.conditions[0]?.field}>
                       [{rule.conditions[0]?.field.replace(/(classification|suggested)/g, "")}] {rule.conditions[0]?.operator} &quot;{String(rule.conditions[0]?.value)}&quot;
                     </span>
@@ -445,7 +445,7 @@ export default function Rules({
               <p className="text-[#3E5360] italic text-center py-10">Select files to generate simulation analysis outputs</p>
             )}
             {simRunning && (
-              <p className="text-cyan-400 font-bold animate-pulse mt-1">█ evaluating rules engines structures...</p>
+              <p className="text-[#fca5a5] font-bold animate-pulse mt-1">█ evaluating rules engines structures...</p>
             )}
           </div>
 

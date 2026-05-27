@@ -45,9 +45,9 @@ export default function AuditLog({
   const getActorIcon = (actor: string) => {
     switch (actor) {
       case "system":
-        return <Bot className="w-4 h-4 text-[#00E5FF]" />;
+        return <Bot className="w-4 h-4 text-[#fca5a5]" />;
       case "user":
-        return <User className="w-4 h-4 text-purple-400" />;
+        return <User className="w-4 h-4 text-[#fca5a5]" />;
       default:
         return <Settings className="w-4 h-4 text-amber-500" />;
     }
@@ -67,7 +67,7 @@ export default function AuditLog({
             placeholder="Search matching ledger summaries, entry IDs, action terms..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-[#05070A] border border-[#183040] pl-9 pr-4 py-1.5 rounded-[4px] text-xs font-mono text-[#E6F7FF] focus:outline-none focus:border-[#00E5FF] placeholder-[#3E5360]"
+            className="w-full bg-[#09090b] border border-[#27272a] pl-9 pr-4 py-1.5 rounded-[4px] text-xs font-mono text-[#f4f4f5] focus:outline-none focus:border-[#b91c1c] placeholder-[#71717a]"
           />
         </div>
 
@@ -75,7 +75,7 @@ export default function AuditLog({
           <select
             value={actorFilter}
             onChange={e => setActorFilter(e.target.value)}
-            className="bg-[#05070A] border border-[#183040] text-xs px-2.5 py-1.5 rounded-[4px] font-mono text-[#A7C7D9] focus:outline-none focus:border-[#00E5FF]"
+            className="bg-[#09090b] border border-[#27272a] text-xs px-2.5 py-1.5 rounded-[4px] font-mono text-[#f4f4f5] focus:outline-none focus:border-[#b91c1c]"
           >
             <option value="">-- Actor Classification --</option>
             <option value="system">Engine Core (AI / Rules)</option>
@@ -89,9 +89,9 @@ export default function AuditLog({
         
         <div className="border-b border-[#183040] pb-3 flex justify-between items-center">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-            <History className="w-4 h-4 text-[#00E5FF]" /> Ledger Transaction Log Registry
+            <History className="w-4 h-4 text-[#fca5a5]" /> Ledger Transaction Log Registry
           </h2>
-          <span className="font-mono text-xs text-[#00E5FF] bg-[#00E5FF]/10 px-2.5 py-0.5 rounded-[2px] uppercase">
+          <span className="font-mono text-xs text-[#fca5a5] bg-[#7f1d1d]/10 px-2.5 py-0.5 rounded-[2px] uppercase">
             Append-only secure system audit
           </span>
         </div>
@@ -117,14 +117,14 @@ export default function AuditLog({
                     <td className="py-3.5 px-4 text-[#6C8798] text-[11px] whitespace-nowrap">
                       {new Date(entry.createdAt).toLocaleString()}
                     </td>
-                    <td className="py-3.5 px-4 text-cyan-400 font-bold font-mono text-[11px]">
+                    <td className="py-3.5 px-4 text-[#fca5a5] font-bold font-mono text-[11px]">
                       {entry.documentId || <span className="text-[#3E5360]">-</span>}
                     </td>
                     <td className="py-3.5 px-4">
                       <span className={`px-1.5 py-0.2 text-[9px] font-bold rounded-[1.5px] uppercase ${
                         entry.action === "error" ? "bg-red-500/10 text-red-400" :
-                        entry.action === "renamed" ? "bg-blue-500/10 text-blue-400" :
-                        entry.action === "reverted" ? "bg-purple-500/10 text-purple-400" :
+                        entry.action === "renamed" ? "bg-[#7f1d1d]/10 text-[#fca5a5]" :
+                        entry.action === "reverted" ? "bg-[#7f1d1d]/10 text-[#fca5a5]" :
                         "bg-green-500/10 text-green-400"
                       }`}>
                         {entry.action}
@@ -153,7 +153,7 @@ export default function AuditLog({
                       {entry.reversible ? (
                         <button
                           onClick={() => handleRevert(entry.id)}
-                          className="px-2.5 py-1 text-[11px] font-mono border border-[#00E5FF] bg-[#00E5FF]/5 hover:bg-[#00E5FF]/15 text-[#00E5FF] rounded-[4px] inline-flex items-center gap-1"
+                          className="px-2.5 py-1 text-[11px] font-mono border border-[#7f1d1d] bg-[#7f1d1d]/5 hover:bg-[#7f1d1d]/15 text-[#fca5a5] rounded-[4px] inline-flex items-center gap-1"
                           title="Restore parameters before change"
                         >
                           <RotateCcw className="w-3.5 h-3.5" /> Undo (Revert)

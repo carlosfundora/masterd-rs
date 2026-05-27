@@ -167,88 +167,106 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
     setMessages((prev) => [...prev, userBubble, assistantBubble]);
 
     let completedText = "";
-    const cancel = await startChat(
-      requestText,
-      thinkMode,
-      searchMode,
-      sessionId,
-      (token: ChatStreamToken) => {
-        setMessages((prev) =>
-          prev.map((m) => {
-            if (m.id !== assistantId) return m;
-            switch (token.type) {
-              case "think":
-                return { ...m, thinkText: (m.thinkText ?? "") + token.text };
-              case "response":
-                completedText += token.text;
-                return { ...m, responseText: m.responseText + token.text };
-              case "done":
-                return { ...m, citations: token.citations, streaming: false };
-              case "error":
-                return { ...m, responseText: `[Error: ${token.message}]`, streaming: false };
-              default:
-                return m;
-            }
-          })
-        );
-
-        if (token.type === "done" || token.type === "error") {
-          setIsStreaming(false);
-          cancelRef.current = null;
-
-          if (token.type === "done" && wantsPolicyDraft) {
-            const raw = extractDraftBlock(completedText);
-            if (!raw) {
-              setDraftStatus("Could not read a policy draft from the assistant response.");
-              return;
-            }
-
-            let parsed: unknown;
-            try {
-              parsed = JSON.parse(raw);
-            } catch {
-              setDraftStatus("The assistant did not return valid JSON for a policy draft.");
-              return;
-            }
-
-            const draft =
-              parsed && typeof parsed === "object"
-                ? normalizeDraft(parsed as Record<string, unknown>, text)
-                : null;
-            if (!draft) {
-              setDraftStatus("The generated policy draft was incomplete.");
-              return;
-            }
-
-            if (!bridge) {
-              setDraftStatus(`Draft ready: ${draft.name} (connect the bridge to save it).`);
-              return;
-            }
-
-            bridge.rules.create(draft).then((res) => {
-              if (res.ok) {
-                setDraftStatus(`Policy created: ${res.data.name}`);
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    id: crypto.randomUUID(),
-                    role: "assistant",
-                    responseText: `Policy created: ${res.data.name}. It is now available in Automation Rules.`,
-                    citations: [],
-                    streaming: false,
-                    thinkExpanded: false,
-                  },
-                ]);
-              } else {
-                setDraftStatus(`Policy draft created, but save failed: ${res.error.message}`);
+    try {
+      const cancel = await startChat(
+        requestText,
+        thinkMode,
+        searchMode,
+        sessionId,
+        (token: ChatStreamToken) => {
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== assistantId) return m;
+              switch (token.type) {
+                case "think":
+                  return { ...m, thinkText: (m.thinkText ?? "") + token.text };
+                case "response":
+                  completedText += token.text;
+                  return { ...m, responseText: m.responseText + token.text };
+                case "done":
+                  return { ...m, citations: token.citations, streaming: false };
+                case "error":
+                  return { ...m, responseText: `[Error: ${token.message}]`, streaming: false };
+                default:
+                  return m;
               }
-            });
+            })
+          );
+
+          if (token.type === "done" || token.type === "error") {
+            setIsStreaming(false);
+            cancelRef.current = null;
+
+            if (token.type === "done" && wantsPolicyDraft) {
+              const raw = extractDraftBlock(completedText);
+              if (!raw) {
+                setDraftStatus("Could not read a policy draft from the assistant response.");
+                return;
+              }
+
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(raw);
+              } catch {
+                setDraftStatus("The assistant did not return valid JSON for a policy draft.");
+                return;
+              }
+
+              const draft =
+                parsed && typeof parsed === "object"
+                  ? normalizeDraft(parsed as Record<string, unknown>, text)
+                  : null;
+              if (!draft) {
+                setDraftStatus("The generated policy draft was incomplete.");
+                return;
+              }
+
+              if (!bridge) {
+                setDraftStatus(`Draft ready: ${draft.name} (connect the bridge to save it).`);
+                return;
+              }
+
+              bridge.rules.create(draft).then((res) => {
+                if (res.ok) {
+                  setDraftStatus(`Policy created: ${res.data.name}`);
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: crypto.randomUUID(),
+                      role: "assistant",
+                      responseText: `Policy created: ${res.data.name}. It is now available in Automation Rules.`,
+                      citations: [],
+                      streaming: false,
+                      thinkExpanded: false,
+                    },
+                  ]);
+                } else {
+                  setDraftStatus(`Policy draft created, but save failed: ${res.error.message}`);
+                }
+              });
+            }
           }
         }
-      }
-    );
+      );
 
-    cancelRef.current = cancel;
+      cancelRef.current = cancel;
+    } catch (error) {
+      setIsStreaming(false);
+      cancelRef.current = null;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                responseText:
+                  error instanceof Error ? error.message : "MASTERd requires the live Tauri runtime.",
+                streaming: false,
+              }
+            : m
+        )
+      );
+      setDraftStatus(error instanceof Error ? error.message : "MASTERd requires the live Tauri runtime.");
+    }
   }, [bridge, input, isStreaming, policyMode, thinkMode, searchMode, sessionId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -272,7 +290,7 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
       <div className="px-4 py-3 border-b border-[#183040] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-[#fca5a5]" />
-          <span className="text-[11px] font-mono font-bold tracking-widest text-[#00E5FF] uppercase">
+          <span className="text-[11px] font-mono font-bold tracking-widest text-[#fca5a5] uppercase">
             MASTERd Intelligence
           </span>
         </div>
@@ -304,7 +322,7 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
               onClick={() => setThinkMode(mode)}
               className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded-[2px] border transition-all ${
                 thinkMode === mode
-                  ? "border-[#00E5FF]/50 text-[#00E5FF] bg-[#00E5FF]/10"
+                  ? "border-[#b91c1c]/50 text-[#fca5a5] bg-[#7f1d1d]/10"
                   : "border-[#183040] text-[#3A5568] hover:text-[#6C8798]"
               }`}
             >
@@ -332,7 +350,7 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
               onClick={() => setSearchMode(mode)}
               className={`flex items-center gap-1 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded-[2px] border transition-all ${
                 searchMode === mode
-                  ? "border-[#00E5FF]/50 text-[#00E5FF] bg-[#00E5FF]/10"
+                  ? "border-[#b91c1c]/50 text-[#fca5a5] bg-[#7f1d1d]/10"
                   : "border-[#183040] text-[#3A5568] hover:text-[#6C8798]"
               }`}
             >
@@ -386,14 +404,14 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
             <div
               className={`rounded-[6px] px-3 py-2 text-[12px] leading-relaxed max-w-[90%] whitespace-pre-wrap ${
                 bubble.role === "user"
-                  ? "bg-[#00E5FF]/10 border border-[#00E5FF]/20 text-[#A7C7D9] ml-8"
+                  ? "bg-[#7f1d1d]/10 border border-[#7f1d1d]/20 text-[#A7C7D9] ml-8"
                   : "bg-[#0B1018] border border-[#183040] text-[#E6F7FF] mr-8"
               }`}
             >
               {bubble.responseText || (bubble.streaming ? "" : "…")}
               {bubble.streaming && (
                 <span className="inline-flex items-center gap-1 ml-1">
-                  <span className="w-1 h-3 bg-[#00E5FF] animate-pulse inline-block" />
+                  <span className="w-1 h-3 bg-[#fca5a5] animate-pulse inline-block" />
                 </span>
               )}
             </div>
@@ -407,7 +425,7 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
                     href={c.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[9px] font-mono text-[#00E5FF]/60 border border-[#183040] px-1.5 py-0.5 rounded-[2px] hover:text-[#00E5FF] hover:border-[#00E5FF]/30 transition-colors truncate max-w-[18ch]"
+                    className="text-[9px] font-mono text-[#fca5a5]/60 border border-[#183040] px-1.5 py-0.5 rounded-[2px] hover:text-[#fca5a5] hover:border-[#7f1d1d]/30 transition-colors truncate max-w-[18ch]"
                     title={c.title}
                   >
                     [{i + 1}] {c.title}
@@ -438,7 +456,7 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
             placeholder={policyMode ? "Describe the policy you want MASTERd to create…" : "Ask MASTERd…"}
             rows={2}
             disabled={isStreaming}
-            className="flex-1 bg-[#0B1018] border border-[#183040] rounded-[4px] px-3 py-2 text-[12px] text-[#E6F7FF] placeholder-[#3A5568] font-mono resize-none focus:outline-none focus:border-[#00E5FF]/40 disabled:opacity-50 leading-relaxed"
+            className="flex-1 bg-[#0B1018] border border-[#183040] rounded-[4px] px-3 py-2 text-[12px] text-[#E6F7FF] placeholder-[#3A5568] font-mono resize-none focus:outline-none focus:border-[#b91c1c]/40 disabled:opacity-50 leading-relaxed"
           />
           {isStreaming ? (
             <button
@@ -455,7 +473,7 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
             <button
               onClick={sendMessage}
               disabled={!input.trim()}
-              className="p-2 text-[#00E5FF] border border-[#00E5FF]/30 rounded-[4px] bg-[#00E5FF]/10 hover:bg-[#00E5FF]/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-[0_0_8px_rgba(0,229,255,0.1)]"
+              className="p-2 text-[#fca5a5] border border-[#7f1d1d]/30 rounded-[4px] bg-[#7f1d1d]/10 hover:bg-[#7f1d1d]/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-[0_0_8px_rgba(185,28,28,0.1)]"
               title="Send (Enter)"
             >
               <Send className="w-4 h-4" />

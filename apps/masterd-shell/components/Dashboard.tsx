@@ -62,7 +62,7 @@ export default function Dashboard({
             </div>
           </div>
           <div className="mt-4 flex items-center text-xs text-[#a1a1aa]">
-            <span className="text-cyan-400 font-mono mr-1.5 animate-pulse">● {status?.queues.processing ?? 0} Active Workers</span>
+            <span className="text-[#fca5a5] font-mono mr-1.5 animate-pulse">● {status?.queues.processing ?? 0} Active Workers</span>
             <span>In processing pipeline</span>
           </div>
         </div>
@@ -146,8 +146,8 @@ export default function Dashboard({
                     <div className="text-[10px] text-[#A7C7D9] mt-0.5">{item.desc}</div>
                   </div>
                   {idx < 6 && (
-                    <div className="hidden lg:block absolute top-1/2 -right-1.5 -translate-y-1/2 z-10 text-[#00E5FF]">
-                      <ArrowRight className="w-3.5 h-3.5 opacity-50 text-[#b91c1c]" />
+                    <div className="hidden lg:block absolute top-1/2 -right-1.5 -translate-y-1/2 z-10 text-[#fca5a5]">
+                      <ArrowRight className="w-3.5 h-3.5 opacity-50 text-[#fca5a5]" />
                     </div>
                   )}
                 </div>
@@ -238,7 +238,7 @@ export default function Dashboard({
         <div id="active-models-terminal" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
           <div className="border-b border-[#183040] pb-3 flex justify-between items-center">
             <h2 className="text-sm font-semibold text-[#E6F7FF] uppercase tracking-wider flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-[#00E5FF]" /> Active Local Models
+              <ShieldCheck className="w-4 h-4 text-[#fca5a5]" /> Active Local Models
             </h2>
           </div>
 
@@ -271,7 +271,7 @@ export default function Dashboard({
             </h2>
             <button 
               onClick={() => setActiveTab("review")}
-              className="text-xs text-[#00E5FF] hover:underline font-mono"
+              className="text-xs text-[#fca5a5] hover:underline font-mono"
             >
               Goto Review Queue →
             </button>
@@ -290,7 +290,7 @@ export default function Dashboard({
                 return (
                   <div 
                     key={review.id} 
-                    className="p-3 bg-[#05070A] border border-[#183040] hover:border-[#3B82F6] rounded-[4px] flex flex-col sm:flex-row justify-between items-start sm:items-center transition-colors gap-2"
+                    className="p-3 bg-[#05070A] border border-[#183040] hover:border-[#7f1d1d] rounded-[4px] flex flex-col sm:flex-row justify-between items-start sm:items-center transition-colors gap-2"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -318,7 +318,7 @@ export default function Dashboard({
                             setActiveTab("review");
                           }
                         }}
-                        className="px-2.5 py-1 text-[11px] text-[#00E5FF] border border-[#00E5FF] hover:bg-[#00E5FF]/10 font-mono rounded-[4px] inline-flex items-center gap-1.5"
+                        className="px-2.5 py-1 text-[11px] text-[#fca5a5] border border-[#7f1d1d] hover:bg-[#7f1d1d]/10 font-mono rounded-[4px] inline-flex items-center gap-1.5"
                       >
                         Inspect
                       </button>

@@ -103,11 +103,6 @@ export default function Home() {
       await refreshState(b);
       if (cancelled) return;
       setInitLoaded(true);
-      if (typeof window !== "undefined") {
-        const seen = window.localStorage.getItem("masterd:onboarding:v1-complete");
-        setTutorialOpen(!seen);
-        setTutorialStep(0);
-      }
 
       // Subscribe to backend events
       unsubscribe = b.events.subscribe(() => refreshState(b));
@@ -403,9 +398,14 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-4">
-              <span className="hidden md:inline-block">LAST OP: <span className="text-[#a1a1aa]">RENAME_APPROVE_TAX_2023</span></span>
+              <span className="hidden md:inline-block">
+                LAST OP:{" "}
+                <span className="text-[#fca5a5]">
+                  {auditLog[0]?.action ? `${auditLog[0].action.toUpperCase()} · ${auditLog[0].summary}` : "No recent actions"}
+                </span>
+              </span>
               <span>|</span>
-              <span>DATABASE: <span className="text-green-400 font-medium">CONNECTED</span></span>
+              <span>DATABASE: <span className="text-green-400 font-medium">{status?.database?.toUpperCase() || "CONNECTED"}</span></span>
             </div>
           </footer>
         </div>

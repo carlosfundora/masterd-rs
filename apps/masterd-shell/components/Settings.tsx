@@ -63,7 +63,7 @@ export default function Settings({ refreshState }: SettingsProps) {
     setTimeout(() => setIsBackupDone(true), 1500);
   };
 
-  const field = "w-full bg-[#05070A] border border-[#183040] p-2 rounded-[4px] text-xs font-mono text-white focus:outline-none focus:border-[#3B82F6]";
+  const field = "w-full bg-[#09090b] border border-[#27272a] p-2 rounded-[4px] text-xs font-mono text-[#f4f4f5] focus:outline-none focus:border-[#b91c1c]";
   const label = "text-[10px] uppercase font-mono tracking-wider font-bold text-[#6C8798]";
 
   if (loading) {
@@ -80,7 +80,7 @@ export default function Settings({ refreshState }: SettingsProps) {
           {/* Storage & Paths */}
           <div className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
             <div className="border-b border-[#183040] pb-3 flex items-center gap-2">
-              <HardDrive className="w-4 h-4 text-[#3B82F6]" />
+              <HardDrive className="w-4 h-4 text-[#fca5a5]" />
               <h2 className="text-sm font-semibold uppercase tracking-wider">Storage & Paths</h2>
             </div>
             <div className="space-y-3 text-xs">
@@ -113,14 +113,14 @@ export default function Settings({ refreshState }: SettingsProps) {
           {/* AI & Generation */}
           <div className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
             <div className="border-b border-[#183040] pb-3 flex items-center gap-2">
-              <Bot className="w-4 h-4 text-[#00E5FF]" />
+              <Bot className="w-4 h-4 text-[#fca5a5]" />
               <h2 className="text-sm font-semibold uppercase tracking-wider">AI & Decision Thresholds</h2>
             </div>
             <div className="space-y-4 text-xs">
               <div className="space-y-2">
                 <div className="flex justify-between font-mono text-[10px] uppercase font-bold text-[#6C8798]">
                   <span>Human Review Threshold</span>
-                  <span className="text-[#00E5FF] font-bold">{cfg.safetyConfidencePct}% confidence</span>
+                  <span className="text-[#fca5a5] font-bold">{cfg.safetyConfidencePct}% confidence</span>
                 </div>
                 <input type="range" min={40} max={99} value={cfg.safetyConfidencePct} onChange={e => set("safetyConfidencePct", Number(e.target.value))} className="w-full h-1.5 bg-[#05070A] rounded-[2px] appearance-none cursor-pointer" />
                 <div className="flex justify-between text-[10px] text-[#6C8798] font-mono">
@@ -155,7 +155,7 @@ export default function Settings({ refreshState }: SettingsProps) {
               </div>
               <p className="text-xs text-[#A7C7D9]">Export full indices or revert index tables to backup points. Done entirely client-side.</p>
               <div className="space-y-2">
-                <button type="button" onClick={handleBackup} className="w-full py-2 bg-[#05070A] hover:bg-[#101827] border border-[#183040] text-green-400 font-mono text-xs rounded-[4px] inline-flex items-center justify-center gap-1.5">
+                <button type="button" onClick={handleBackup} className="w-full py-2 bg-[#09090b] hover:bg-[#18181b] border border-[#27272a] text-green-400 font-mono text-xs rounded-[4px] inline-flex items-center justify-center gap-1.5">
                   <RefreshCw className="w-3.5 h-3.5" /> Trigger DB Backup Export
                 </button>
                 {isBackupDone && (
@@ -167,7 +167,7 @@ export default function Settings({ refreshState }: SettingsProps) {
               </div>
             </div>
             <div className="pt-4 border-t border-[#183040]/70">
-              <button type="submit" disabled={saving} className="w-full py-2 bg-[#3B82F6] hover:bg-blue-600 border border-[#3B82F6] text-white font-mono font-bold rounded-[4px] cursor-pointer flex items-center justify-center gap-1.5 text-xs">
+              <button type="submit" disabled={saving} className="w-full py-2 bg-[#b91c1c] hover:bg-[#991b1b] border border-[#b91c1c] text-white font-mono font-bold rounded-[4px] cursor-pointer flex items-center justify-center gap-1.5 text-xs">
                 <Save className="w-4 h-4" /> {saving ? "Saving…" : "Save System Preferences"}
               </button>
               {saveSuccess && <div className="text-center text-xs text-green-400 font-mono font-bold mt-2">Preferences saved!</div>}
@@ -181,7 +181,7 @@ export default function Settings({ refreshState }: SettingsProps) {
           {/* Retrieval Tuning */}
           <div className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
             <div className="border-b border-[#183040] pb-3 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-purple-400" />
+              <FileText className="w-4 h-4 text-[#fca5a5]" />
               <h2 className="text-sm font-semibold uppercase tracking-wider">Retrieval & RAG Tuning</h2>
             </div>
             <div className="grid grid-cols-2 gap-3 text-xs">
@@ -203,7 +203,7 @@ export default function Settings({ refreshState }: SettingsProps) {
           {/* Embedding Services */}
           <div className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
             <div className="border-b border-[#183040] pb-3 flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-yellow-400" />
+              <Cpu className="w-4 h-4 text-[#fca5a5]" />
               <h2 className="text-sm font-semibold uppercase tracking-wider">Embedding Service URLs</h2>
             </div>
             <div className="space-y-3 text-xs">
@@ -236,15 +236,15 @@ export default function Settings({ refreshState }: SettingsProps) {
         {/* Row 3: Ollama Fallback */}
         <div className="bg-[#0B1018] border border-[#183040] border-dashed p-5 rounded-[4px] space-y-4">
           <div className="border-b border-[#183040] pb-3 flex items-center gap-2">
-            <Globe className="w-4 h-4 text-orange-400" />
+            <Globe className="w-4 h-4 text-[#fca5a5]" />
             <h2 className="text-sm font-semibold uppercase tracking-wider">Ollama Fallback Engine</h2>
-            <span className="ml-auto text-[10px] font-mono text-[#6C8798] bg-[#05070A] border border-[#183040] px-2 py-0.5 rounded-[2px]">AUTO-ACTIVATES</span>
+            <span className="ml-auto text-[10px] font-mono text-[#fca5a5] bg-[#09090b] border border-[#27272a] px-2 py-0.5 rounded-[2px]">AUTO-ACTIVATES</span>
           </div>
           <p className="text-xs text-[#A7C7D9]">
             When the embedded LFM2.5 models fail to load (missing assets, memory pressure),
             MASTERd transparently falls back to a locally-running{" "}
-            <span className="font-mono text-orange-400">ollama</span> daemon.
-            Install from <span className="font-mono text-[#3B82F6]">ollama.com</span> and
+            <span className="font-mono text-[#fca5a5]">ollama</span> daemon.
+            Install from <span className="font-mono text-[#fca5a5]">ollama.com</span> and
             run <span className="font-mono text-white bg-[#05070A] px-1 rounded">ollama pull llama3.2</span> to enable.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
