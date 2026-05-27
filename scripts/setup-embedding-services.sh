@@ -115,7 +115,7 @@ Usage:
 Environment:
   HF_TOKEN     Optional Hugging Face token for gated/private models.
   HF_HOME      Optional local Hugging Face cache root.
-  PYTHON_BIN   Python interpreter, default python3.12.
+  PYTHON_BIN   Python interpreter, default python3.12, fallback python3/uv.
 EOF
       exit 0
       ;;

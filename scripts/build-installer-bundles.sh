@@ -162,13 +162,15 @@ ARCH="$(uname -m)"
 case "${ARCH}" in
   x86_64|amd64)
     # AMD Ryzen CPUs report x86_64 and require Meilisearch's linux-amd64 asset.
+    NATIVE_EXPECTED_FILE_ARCH="x86-64"
     MEILI_PLATFORM="linux-amd64"
-    MEILI_EXPECTED_FILE_ARCH="x86-64"
+    MEILI_EXPECTED_FILE_ARCH="${NATIVE_EXPECTED_FILE_ARCH}"
     FALKOR_WHEEL_PLATFORM="manylinux_2_17_x86_64"
     ;;
   aarch64|arm64)
+    NATIVE_EXPECTED_FILE_ARCH="ARM aarch64"
     MEILI_PLATFORM="linux-aarch64"
-    MEILI_EXPECTED_FILE_ARCH="ARM aarch64"
+    MEILI_EXPECTED_FILE_ARCH="${NATIVE_EXPECTED_FILE_ARCH}"
     FALKOR_WHEEL_PLATFORM="manylinux_2_17_aarch64"
     ;;
   *)
@@ -179,6 +181,15 @@ esac
 BIN_DIR="${ROOT_DIR}/apps/masterd-desktop-tauri/binaries"
 MOD_DIR="${ROOT_DIR}/apps/masterd-desktop-tauri/modules"
 mkdir -p "${BIN_DIR}" "${MOD_DIR}"
+
+native_binary_matches_arch() {
+  local bin="$1"
+  local desc
+  [[ -f "${bin}" && -s "${bin}" ]] || return 1
+  command -v file >/dev/null 2>&1 || masterd_die "file is required to validate downloaded native binaries"
+  desc="$(file "${bin}")"
+  [[ "${desc}" == *"${NATIVE_EXPECTED_FILE_ARCH}"* ]]
+}
 
 validate_meilisearch_binary() {
   local bin="$1"
@@ -193,6 +204,10 @@ validate_meilisearch_binary() {
 
 validate_valkey_tarball() {
   tar -tzf "$1" >/dev/null
+}
+
+validate_falkor_install() {
+  native_binary_matches_arch "${FALKOR_SO}" && native_binary_matches_arch "${FALKOR_SERVER}"
 }
 
 # Meilisearch v1.8.3 — latest stable
@@ -216,7 +231,7 @@ validate_meilisearch_binary "${MEILI_BIN}"
 # Valkey v7.2.5 — stable release
 VALKEY_VERSION="7.2.5"
 VALKEY_BIN="${BIN_DIR}/valkey-server"
-if [[ ! -f "${VALKEY_BIN}" ]]; then
+if [[ ! -f "${VALKEY_BIN}" ]] || ! native_binary_matches_arch "${VALKEY_BIN}"; then
   printf "%b║%b  Building valkey %s from source (no prebuilt binary available)...%b\n" "${RED}" "${CYAN}" "${VALKEY_VERSION}" "${RESET}"
   VALKEY_TMP="${ROOT_DIR}/target/valkey-src"
   mkdir -p "${VALKEY_TMP}"
@@ -236,6 +251,7 @@ if [[ ! -f "${VALKEY_BIN}" ]]; then
 else
   printf "%b║%b  valkey-server already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
 fi
+native_binary_matches_arch "${VALKEY_BIN}" || masterd_die "valkey-server binary failed architecture validation"
 
 # FalkorDB module from official falkordb-bin wheels.
 # MASTERd runs Valkey and FalkorDB as separate local DB processes;
@@ -322,13 +338,14 @@ PY
   mv "${server_tmp}" "${FALKOR_SERVER}"
 }
 
-if [[ ! -f "${FALKOR_SO}" || ! -f "${FALKOR_SERVER}" ]]; then
+if [[ ! -f "${FALKOR_SO}" || ! -f "${FALKOR_SERVER}" ]] || ! validate_falkor_install; then
   printf "%b║%b  Installing FalkorDB graph DB...%b\n" "${RED}" "${CYAN}" "${RESET}"
   install_falkor_from_wheel
   printf "%b║%b  FalkorDB graph DB installed.%b\n" "${RED}" "${GREEN}" "${RESET}"
 else
   printf "%b║%b  FalkorDB graph DB already present, skipping.%b\n" "${RED}" "${YELLOW}" "${RESET}"
 fi
+validate_falkor_install || masterd_die "FalkorDB graph DB files failed architecture validation"
 
 # ── Tauri app + installer bundle ──────────────────────────────────────────
 printf "%b║%b  Compiling Tauri desktop app and producing installer...%b\n" "${RED}" "${CYAN}" "${RESET}"
