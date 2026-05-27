@@ -211,6 +211,7 @@ esac
 
 # Validate environment before touching anything.
 [[ -f "${ROCM_CONSTRAINTS}" ]]    || die "ROCm constraints file missing: ${ROCM_CONSTRAINTS}"
+masterd_ensure_source_build_tools "${ROOT_DIR}"
 masterd_resolve_python "${ROOT_DIR}"
 PYTHON_BIN="${MASTERD_PYTHON_BIN}"
 UV_BIN=""
@@ -228,14 +229,12 @@ setup_venv() {
   local venv_dir="${SERVICES_DIR}/${name}/.venv"
   local reqs_file="${SERVICES_DIR}/${name}/requirements.txt"
 
-  info "Setting up ${name} venv at ${venv_dir}..."
+  info "Setting up ${name} venv at ${venv_dir} (overwriting any existing environments)..."
   mkdir -p "${SERVICES_DIR}/${name}"
 
-  if [[ ! -d "${venv_dir}" ]]; then
-    create_venv "${venv_dir}"
-  else
-    warn "  venv already exists, skipping creation"
-  fi
+  # Overwrite older crud from failed installs automatically
+  /usr/bin/rm -rf "${venv_dir}"
+  create_venv "${venv_dir}"
 
   if [[ -f "${reqs_file}" ]]; then
     info "  Installing from ${reqs_file} (ROCm index enforced)..."
