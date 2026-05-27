@@ -1,0 +1,12 @@
+[package]
+name = "masterd-atom-runtime"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rs_rotorquant_codec = { path = "../rs_rotorquant_codec" }
+rs_turboquant_codec = { path = "../rs_turboquant_codec" }
+serde.workspace = true
+thiserror.workspace = true

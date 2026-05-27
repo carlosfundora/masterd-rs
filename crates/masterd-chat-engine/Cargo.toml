@@ -9,6 +9,7 @@ license.workspace = true
 masterd-pipeline     = { path = "../masterd-pipeline" }
 masterd-prompt-core  = { path = "../masterd-prompt-core" }
 masterd-index        = { path = "../masterd-index" }
+masterd-atom-runtime = { path = "../masterd-atom-runtime" }
 
 anyhow       = { workspace = true }
 serde        = { workspace = true }

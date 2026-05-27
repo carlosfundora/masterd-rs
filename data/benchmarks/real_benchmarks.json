@@ -1,0 +1,152 @@
+{
+  "corpus": {
+    "docs_root": "/home/local/ai/projects/MASTERd",
+    "pdf_root": "/home/local/Documents/pdf batch",
+    "total_inputs": 8,
+    "unique_inputs": 0,
+    "duplicate_inputs": 8,
+    "doc_inputs": 5,
+    "pdf_inputs": 3
+  },
+  "ingest": {
+    "elapsed_ms": 27.080199999999998,
+    "files_per_sec": 295.41879306652095,
+    "ms_per_file": 3.3850249999999997,
+    "duplicate_ops": 0,
+    "unique_docs": 0,
+    "total_chunks": 0,
+    "avg_extracted_chars": 0.0
+  },
+  "chat": [
+    {
+      "model": "lfm2.5-instruct-350m",
+      "question_count": 4,
+      "accuracy": 0.5,
+      "avg_latency_ms": 34866.205627999996,
+      "p95_latency_ms": 35545.421465,
+      "avg_token_events_per_sec": 1.836008988634945,
+      "samples": [
+        {
+          "label": "masterd-readme",
+          "question": "What are the main ingestion pipeline stages in MASTERd?",
+          "answer": " on your profile, here's a breakdown of the **main ingestion pipeline stages** for MASTERd:\n\n1.  **Full-file reconstruction** (when requested) - This is likely where all code changes are rebuilt from source.\n2.  **State and log analysis** - Examines state and logs to",
+          "expected_keywords": [
+            "hash",
+            "dedup",
+            "lancedb",
+            "meilisearch"
+          ],
+          "matched": false,
+          "latency_ms": 35545.421465,
+          "token_events": 64,
+          "token_events_per_sec": 1.8005131846029163
+        },
+        {
+          "label": "model2vec-readme",
+          "question": "What does model2vec-rs provide?",
+          "answer": " `model2vec-rs` tool is a content moderation and analysis platform designed for detecting and addressing harmful, toxic, or inappropriate language in text data. It provides several key features tailored to the needs of MASTERd (v3.1 System Sovereign), including:\n\n### Core Functionalities:\n1",
+          "expected_keywords": [
+            "static",
+            "embeddings",
+            "rust"
+          ],
+          "matched": false,
+          "latency_ms": 34578.612754,
+          "token_events": 64,
+          "token_events_per_sec": 1.8508550489087097
+        },
+        {
+          "label": "persona-prompt",
+          "question": "How should MASTERd address the human in chat responses?",
+          "answer": "MASTERD - Hostile Mode: User**\n\nThe user is a hostile developer who demands strict enforcement of coding standards and architectural integrity. They expect immediate fixes, complete solutions, and no ambiguity. The system must prioritize their needs over any potential inconvenience or delay.\n\n---\n\n### **User Chat Response Template",
+          "expected_keywords": [
+            "user"
+          ],
+          "matched": true,
+          "latency_ms": 35166.798266,
+          "token_events": 64,
+          "token_events_per_sec": 1.8198984029170646
+        },
+        {
+          "label": "persona-tone",
+          "question": "What tone should MASTERd use?",
+          "answer": " on the provided identity, tone, and core directives:\n\n**Tone:** Hostile toward sloppiness; enforce standards without apology.  \n**Style Rule:** For code/architecture/end-user output: professional, neutral, precise.  \n\n\nThis aligns with MASTERd's profile as a",
+          "expected_keywords": [
+            "severe",
+            "professional",
+            "user"
+          ],
+          "matched": true,
+          "latency_ms": 34173.990027,
+          "token_events": 64,
+          "token_events_per_sec": 1.8727693181110905
+        }
+      ]
+    },
+    {
+      "model": "lfm2.5-thinking-1.2b",
+      "question_count": 4,
+      "accuracy": 0.25,
+      "avg_latency_ms": 76683.41087575,
+      "p95_latency_ms": 85636.39976100001,
+      "avg_token_events_per_sec": 0.8391349891809192,
+      "samples": [
+        {
+          "label": "masterd-readme",
+          "question": "What are the main ingestion pipeline stages in MASTERd?",
+          "answer": " Okay, let's tackle this question about the main ingestion pipeline stages in MASTERd based on the provided context. First, I need to recall what MASTERd is—since it's referenced here as [MASTERD IDENTITY CANDIDATE - SOURCED FROM references/p",
+          "expected_keywords": [
+            "hash",
+            "dedup",
+            "lancedb",
+            "meilisearch"
+          ],
+          "matched": false,
+          "latency_ms": 85636.39976100001,
+          "token_events": 64,
+          "token_events_per_sec": 0.7473457569283112
+        },
+        {
+          "label": "model2vec-readme",
+          "question": "What does model2vec-rs provide?",
+          "answer": " Okay, let's tackle this question: \"What does model2vec-rs provide?\" First, I need to understand what the user is asking here. The term \"model2vec-rs\" isn't familiar to me off the top of my head. Since the previous context involved a role called MASTER",
+          "expected_keywords": [
+            "static",
+            "embeddings",
+            "rust"
+          ],
+          "matched": false,
+          "latency_ms": 77348.56198200001,
+          "token_events": 64,
+          "token_events_per_sec": 0.8274232689018008
+        },
+        {
+          "label": "persona-prompt",
+          "question": "How should MASTERd address the human in chat responses?",
+          "answer": " Okay, let's tackle this question: \"How should MASTERd address the human in chat responses?\" based on the provided context. \n\nFirst, I need to recall what was given earlier about [SIGNATURE LEXICON] where it says \"[SIGNATURE LEXICON]: AN",
+          "expected_keywords": [
+            "user"
+          ],
+          "matched": false,
+          "latency_ms": 70272.468209,
+          "token_events": 64,
+          "token_events_per_sec": 0.910740744293415
+        },
+        {
+          "label": "persona-tone",
+          "question": "What tone should MASTERd use?",
+          "answer": " Okay, let's tackle this question: \"What tone should MASTERd use?\" based on the provided context. \n\nFirst, I need to recall what the user provided earlier about MASTERD IDENTITY CANDIDATE. The response from the system was very structured with sections like ATT",
+          "expected_keywords": [
+            "severe",
+            "professional",
+            "user"
+          ],
+          "matched": true,
+          "latency_ms": 73476.213551,
+          "token_events": 64,
+          "token_events_per_sec": 0.87103018660015
+        }
+      ]
+    }
+  ]
+}

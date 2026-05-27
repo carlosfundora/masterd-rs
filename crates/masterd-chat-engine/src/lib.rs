@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use candle_core::{Device, quantized::gguf_file};
 use candle_transformers::generation::{LogitsProcessor, Sampling};
 use candle_transformers::models::quantized_lfm2::ModelWeights;
+use masterd_atom_runtime::{parse_gguf_header_bytes, synthesize_load_plan};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
@@ -114,6 +115,18 @@ impl LoadedModel {
             "loading embedded model '{label}' ({:.0} MB)",
             gguf_bytes.len() as f64 / 1_048_576.0
         );
+        if let Ok(header) = parse_gguf_header_bytes(gguf_bytes) {
+            let plan = synthesize_load_plan(&header, 64);
+            debug!(
+                "atom gguf plan for {label}: tensors={} metadata={} prefetch={} chunk={} mmap={} pinned={}",
+                header.tensor_count,
+                header.metadata_kv_count,
+                plan.prefetch_bytes,
+                plan.io_chunk_bytes,
+                plan.use_mmap,
+                plan.use_pinned_staging
+            );
+        }
         let device = Device::Cpu;
 
         // GGUF reader requires Read + Seek — Cursor provides both over &[u8].

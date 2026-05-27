@@ -7,6 +7,7 @@ exclude = [
 ]
 members = [
     "crates/masterd-chat-engine",
+    "crates/masterd-atom-runtime",
     "crates/masterd-core",
     "crates/masterd-data",
     "crates/masterd-index",
@@ -18,6 +19,8 @@ members = [
     "crates/masterd-sidecars",
     "crates/masterd-ui-contract",
     "crates/model2vec-rs",
+    "crates/rs_rotorquant_codec",
+    "crates/rs_turboquant_codec",
     "apps/masterd-bootstrap",
     "apps/masterd-engine-check",
     "apps/masterd-ingest",

@@ -7,6 +7,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+masterd-atom-runtime = { path = "../masterd-atom-runtime" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

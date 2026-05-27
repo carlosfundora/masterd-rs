@@ -1,6 +1,11 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+pub use masterd_atom_runtime::{
+    AmdGpuClass, KernelCapability, MASTERD_MODEL_RUNTIME_SPECS, MasterdModelRuntimeSpec,
+    ModelAssetFormat, ModelRuntimeRole, PreferredRuntime, cpu_acceleration_flags,
+    runtime_kernel_capabilities, runtime_spec,
+};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

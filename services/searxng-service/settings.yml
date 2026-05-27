@@ -14,7 +14,7 @@ search:
 server:
   bind_address: "127.0.0.1"
   port: 9265
-  secret_key: "MASTERd local development secret; installer rewrites this"
+  secret_key: "XeuuMEywyDuDQSn8hs3gyYhlGZsEVULfgJqPVaCWvZLlGdDBIWOKF_qZy3naYKE6"
   limiter: false
   image_proxy: false
 
