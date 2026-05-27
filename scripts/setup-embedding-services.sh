@@ -30,16 +30,30 @@ SERVICES_DIR="${ROOT_DIR}/services"
 
 source "${ROOT_DIR}/scripts/lib/install-bootstrap.sh"
 
-# ── AMD ROCm index ────────────────────────────────────────────────────────
+# Detect if AMD ROCm/GPU is available on the system.
+HAS_ROCM=0
+if command -v rocm-smi >/dev/null 2>&1 || [[ -d "/opt/rocm" || -c "/dev/kfd" ]]; then
+  HAS_ROCM=1
+fi
+
+# ── AMD ROCm/CPU index ────────────────────────────────────────────────────
 # Keep these as local script variables. Passing them directly to pip/uv package
 # installs avoids leaking package-index URLs into uv python/bootstrap commands.
-ROCM_TORCH_INDEX="${ROCM_TORCH_INDEX:-https://download.pytorch.org/whl/nightly/rocm6.3}"
-ROCM_STABLE_INDEX="${ROCM_STABLE_INDEX:-https://download.pytorch.org/whl/rocm6.2.4}"
+if [[ "${HAS_ROCM}" == "1" ]]; then
+  info "AMD ROCm/GPU detected. Enforcing ROCm PyTorch index."
+  ROCM_TORCH_INDEX="${ROCM_TORCH_INDEX:-https://download.pytorch.org/whl/nightly/rocm6.3}"
+  ROCM_STABLE_INDEX="${ROCM_STABLE_INDEX:-https://download.pytorch.org/whl/rocm6.2.4}"
+else
+  warn "No AMD ROCm/GPU detected. Setting up CPU-only PyTorch index."
+  ROCM_TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+  ROCM_STABLE_INDEX="https://download.pytorch.org/whl/cpu"
+fi
+
 ROCM_CONSTRAINTS="${ROOT_DIR}/config/rocm-constraints.txt"
 unset UV_EXTRA_INDEX_URL UV_INDEX_URL UV_CONSTRAINT
 unset PIP_EXTRA_INDEX_URL PIP_INDEX_URL PIP_CONSTRAINT
 
-# Block CUDA; ROCm only.
+# Block CUDA; ROCm/CPU only.
 export CUDA_VISIBLE_DEVICES=""
 unset CUDA_HOME 2>/dev/null || true
 
@@ -191,11 +205,21 @@ from transformers import AutoModel, AutoTokenizer
 model_name = os.environ["MODEL_NAME"]
 trust_remote_code = os.environ.get("TRUST_REMOTE_CODE") == "1"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=trust_remote_code)
-model = AutoModel.from_pretrained(model_name, trust_remote_code=trust_remote_code)
-
-print(f"prefetched {model_name}")
-print(f"tokenizer={type(tokenizer).__name__} model={type(model).__name__}")
+try:
+    print(f"Prefetching {model_name}...")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+    model = AutoModel.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+    print(f"prefetched {model_name}")
+except Exception as e:
+    print(f"Failed to prefetch {model_name}: {e}")
+    if "ColBERT" in model_name:
+        fallback = "colbert-ir/colbertv2.0"
+        print(f"Retrying prefetch with fallback: {fallback}")
+        tokenizer = AutoTokenizer.from_pretrained(fallback)
+        model = AutoModel.from_pretrained(fallback)
+        print(f"prefetched fallback {fallback}")
+    else:
+        raise e
 PY
   success "  ${service_name} model cache ready."
 }
@@ -333,8 +357,8 @@ REQS
 """Jina Embeddings HTTP service for MASTERd (port 11447).
 
 Provides:
-  POST /embed   — dense sentence/code embeddings (768-dim)
-  GET  /health  — health check
+  POST /embed or /v1/embeddings — dense sentence/code embeddings (768-dim)
+  GET  /health                  — health check
 """
 from __future__ import annotations
 import os
@@ -360,8 +384,10 @@ async def load_model() -> None:
 
 
 class EmbedRequest(BaseModel):
-    texts: list[str]
+    texts: list[str] = None
+    input: list[str] = None
     task: str = "text-matching"
+    model: str = None
 
 
 @app.get("/health")
@@ -370,24 +396,38 @@ async def health() -> dict:
 
 
 @app.post("/embed")
+@app.post("/v1/embeddings")
 async def embed(req: EmbedRequest) -> dict:
     assert _model is not None, "Model not loaded"
+    texts = req.input if req.input is not None else req.texts
+    if texts is None:
+        return {"error": "either 'input' or 'texts' is required"}
+
     if hasattr(_model, "encode"):
         with torch.no_grad():
-            vecs = _model.encode(req.texts, task=req.task, max_length=MAX_LENGTH)
+            vecs = _model.encode(texts, task=req.task, max_length=MAX_LENGTH)
         if not isinstance(vecs, torch.Tensor):
             vecs = torch.tensor(vecs)
         vecs = torch.nn.functional.normalize(vecs, dim=-1)
     else:
         enc = _tokenizer(
-            req.texts, padding=True, truncation=True, max_length=MAX_LENGTH, return_tensors="pt"
+            texts, padding=True, truncation=True, max_length=MAX_LENGTH, return_tensors="pt"
         ).to(DEVICE)
         with torch.no_grad():
             out = _model(**enc)
         mask = enc["attention_mask"].unsqueeze(-1).float()
         vecs = (out.last_hidden_state * mask).sum(1) / mask.sum(1)
         vecs = torch.nn.functional.normalize(vecs, dim=-1)
-    return {"embeddings": vecs.cpu().tolist(), "dim": vecs.shape[-1]}
+        
+    embeddings_list = vecs.cpu().tolist()
+    data = [{"embedding": e, "index": idx, "object": "embedding"} for idx, e in enumerate(embeddings_list)]
+    return {
+        "embeddings": embeddings_list,
+        "dim": vecs.shape[-1],
+        "data": data,
+        "model": MODEL_NAME,
+        "object": "list"
+    }
 
 
 if __name__ == "__main__":
@@ -415,8 +455,8 @@ REQS
 """Qwen3-Embedding HTTP service for MASTERd (port 11502).
 
 Provides:
-  POST /embed   — dense semantic embeddings (1024-dim)
-  GET  /health  — health check
+  POST /embed or /v1/embeddings — dense semantic embeddings (1024-dim)
+  GET  /health                  — health check
 """
 from __future__ import annotations
 import os
@@ -441,8 +481,10 @@ async def load_model() -> None:
 
 
 class EmbedRequest(BaseModel):
-    texts: list[str]
+    texts: list[str] = None
+    input: list[str] = None
     max_length: int = 512
+    model: str = None
 
 
 @app.get("/health")
@@ -451,17 +493,31 @@ async def health() -> dict:
 
 
 @app.post("/embed")
+@app.post("/v1/embeddings")
 async def embed(req: EmbedRequest) -> dict:
     assert _model is not None, "Model not loaded"
+    texts = req.input if req.input is not None else req.texts
+    if texts is None:
+        return {"error": "either 'input' or 'texts' is required"}
+
     enc = _tokenizer(
-        req.texts, padding=True, truncation=True, max_length=req.max_length, return_tensors="pt"
+        texts, padding=True, truncation=True, max_length=req.max_length, return_tensors="pt"
     ).to(DEVICE)
     with torch.no_grad():
         out = _model(**enc)
     mask = enc["attention_mask"].unsqueeze(-1).float()
     vecs = (out.last_hidden_state * mask).sum(1) / mask.sum(1)
     vecs = torch.nn.functional.normalize(vecs, dim=-1)
-    return {"embeddings": vecs.cpu().tolist(), "dim": vecs.shape[-1]}
+    
+    embeddings_list = vecs.cpu().tolist()
+    data = [{"embedding": e, "index": idx, "object": "embedding"} for idx, e in enumerate(embeddings_list)]
+    return {
+        "embeddings": embeddings_list,
+        "dim": vecs.shape[-1],
+        "data": data,
+        "model": MODEL_NAME,
+        "object": "list"
+    }
 
 
 if __name__ == "__main__":

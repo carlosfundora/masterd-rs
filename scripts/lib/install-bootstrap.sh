@@ -112,11 +112,50 @@ masterd_resolve_python() {
   [[ -x "${MASTERD_PYTHON_BIN}" ]] || masterd_die "uv could not provide Python 3.12"
 }
 
+masterd_install_system_dep() {
+  local cmd="$1"
+  local pkg_deb="$2"
+  local pkg_rpm="$3"
+  local pkg_arch="$4"
+
+  if command -v "${cmd}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  masterd_log "System dependency '${cmd}' is missing. Attempting auto-install..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -y || true
+    sudo apt-get install -y "${pkg_deb}"
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y "${pkg_rpm}"
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y "${pkg_rpm}"
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Sy --noconfirm "${pkg_arch}"
+  else
+    masterd_die "Cannot install '${cmd}'. No supported package manager found (apt-get, dnf, yum, pacman). Please install '${pkg_deb}' manually."
+  fi
+
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    masterd_die "Failed to install '${cmd}'. Please install it manually."
+  fi
+}
+
 masterd_ensure_source_build_tools() {
   masterd_init_bootstrap "$1"
 
+  # First, ensure basic tools needed for bootstrap/downloads
+  masterd_install_system_dep curl curl curl curl
+  masterd_install_system_dep tar tar tar tar
+  masterd_install_system_dep xz xz xz xz
+  masterd_install_system_dep file file file file
+  masterd_install_system_dep make make make make
+
+  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+    masterd_install_system_dep gcc build-essential gcc gcc
+  fi
+
   if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
-    command -v curl >/dev/null 2>&1 || masterd_die "curl is required to install Rust automatically"
     masterd_log "Rust toolchain not found; installing stable Rust via rustup"
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
     masterd_prepend_path "${HOME}/.cargo/bin"
