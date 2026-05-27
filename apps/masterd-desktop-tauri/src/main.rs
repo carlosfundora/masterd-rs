@@ -225,15 +225,11 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
     let jina_url = config.jina_url;
     let model2vec_url = "http://127.0.0.1:11448".to_string();
 
-    let colbert_health = tokio::task::spawn_blocking(move || check_service_health(&colbert_url))
-        .await
-        .unwrap_or_else(|_| "offline".to_string());
-    let jina_health = tokio::task::spawn_blocking(move || check_service_health(&jina_url))
-        .await
-        .unwrap_or_else(|_| "offline".to_string());
-    let model2vec_health = tokio::task::spawn_blocking(move || check_service_health(&model2vec_url))
-        .await
-        .unwrap_or_else(|_| "offline".to_string());
+    let (colbert_health, jina_health, model2vec_health) = tokio::join!(
+        check_service_health_async(&colbert_url),
+        check_service_health_async(&jina_url),
+        check_service_health_async(&model2vec_url),
+    );
     Ok(ok(SystemStatus {
         engine: "online".to_string(), database: "connected".to_string(), watcher: "active".to_string(),
         models: vec![
@@ -280,9 +276,9 @@ fn num_logical_cpus() -> u32 {
         .map(|s| s.lines().filter(|l| l.starts_with("processor")).count() as u32).unwrap_or(1)
 }
 
-fn check_service_health(url: &str) -> String {
+async fn check_service_health_async(url: &str) -> String {
     let health_url = format!("{}/health", url.trim_end_matches('/'));
-    let client = match reqwest::blocking::Client::builder()
+    let client = match reqwest::Client::builder()
         .timeout(Duration::from_millis(500))
         .build()
     {
@@ -290,7 +286,7 @@ fn check_service_health(url: &str) -> String {
         Err(_) => return "offline".into(),
     };
 
-    match client.get(health_url).send() {
+    match client.get(health_url).send().await {
         Ok(response) if response.status().is_success() => "online".into(),
         _ => "offline".into(),
     }
@@ -315,10 +311,7 @@ async fn intake_add_files(
             .to_string();
         let extension = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_string();
         let size_bytes = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-        let mut status = "queued".to_string();
-        let mut progress = 0;
-        let mut duplicate_status = Some("unknown".to_string());
-
+        
         if let Some(store) = store.clone() {
             let path_for_ingest = path.clone();
             let ocr_language = state.config.lock().await.ocr_language.clone();
@@ -329,42 +322,37 @@ async fn intake_add_files(
                 )
             })
             .await
-            .map_err(|err| err.to_string())?
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| format!("Failed to spawn blocking task: {}", err))?
+            .map_err(|err| format!("Ingestion failed: {}", err))?;
 
-            if let Some(doc) = ingest_result.document.clone() {
-                status = if ingest_result.run.status == "error" { "error".into() } else { "complete".into() };
-                progress = if status == "error" { 0 } else { 100 };
-                duplicate_status = Some(doc.duplicate_status.clone());
-                let mut queue = state.intake_queue.lock().await;
-                queue.push(crate::state::IntakeQueueItem {
-                    id: ingest_result.run.id.clone(),
-                    file_name: doc.current_name,
-                    path: doc.current_path,
-                    extension: doc.extension,
-                    size_bytes: doc.size_bytes,
-                    status,
-                    progress,
-                    duplicate_status,
-                    created_at: ingest_result.run.created_at.clone(),
-                    updated_at: ingest_result.run.updated_at.clone(),
-                });
-                continue;
-            }
+            let item = crate::state::IntakeQueueItem {
+                id: ingest_result.run.id.clone(),
+                file_name: ingest_result.document.as_ref().map(|d| d.current_name.clone()).unwrap_or(file_name),
+                path: path.clone(),
+                extension: extension.clone(),
+                size_bytes,
+                status: if ingest_result.run.status == "error" { "error".into() } else { "complete".into() },
+                progress: if ingest_result.run.status == "error" { 0 } else { 100 },
+                duplicate_status: ingest_result.document.map(|d| d.duplicate_status),
+                created_at: ingest_result.run.created_at.clone(),
+                updated_at: ingest_result.run.updated_at.clone(),
+            };
+            items.push(item);
+        } else {
+            // Fallback when no store available
+            items.push(crate::state::IntakeQueueItem {
+                id: Uuid::new_v4().to_string(),
+                file_name,
+                path: path.clone(),
+                extension,
+                size_bytes,
+                status: "error".into(),
+                progress: 0,
+                duplicate_status: Some("store_unavailable".into()),
+                created_at: now_ts(),
+                updated_at: now_ts(),
+            });
         }
-
-        items.push(crate::state::IntakeQueueItem {
-            id: Uuid::new_v4().to_string(),
-            file_name,
-            path: path.clone(),
-            extension,
-            size_bytes,
-            status,
-            progress,
-            duplicate_status,
-            created_at: now_ts(),
-            updated_at: now_ts(),
-        });
     }
 
     if !items.is_empty() {
@@ -1065,12 +1053,23 @@ async fn preferences_draft_policy(
     let Some(store) = data_store(&state) else {
         return Ok(err_result("DATA_STORE_UNAVAILABLE", "Canonical preference store is unavailable", true));
     };
-    let preferences = store.list_preferences().map_err(|err| err.to_string())?;
-    let document = if let Some(id) = request.document_id.as_deref() {
-        store.get_document(id).map_err(|err| err.to_string())?
-    } else {
-        None
-    };
+
+    let document_id = request.document_id.clone();
+    let goal = request.goal.clone();
+    let max_tokens = request.max_tokens;
+
+    // Move expensive operations to blocking thread
+    let (preferences, document) = tokio::task::spawn_blocking(move || {
+        let preferences = store.list_preferences().map_err(|err| err.to_string())?;
+        let document = if let Some(id) = document_id.as_deref() {
+            store.get_document(id).map_err(|err| err.to_string())?
+        } else {
+            None
+        };
+        Ok::<_, String>((preferences, document))
+    })
+    .await
+    .map_err(|err| err.to_string())??;
     let preference_sample = preferences
         .iter()
         .take(24)
@@ -1099,7 +1098,7 @@ async fn preferences_draft_policy(
             "confidence": doc.confidence,
         })
     });
-    let goal = request.goal.unwrap_or_else(|| {
+    let goal = goal.unwrap_or_else(|| {
         "Draft review-gated learned preferences for naming, tagging, classification, routing, or retrieval behavior.".to_string()
     });
     let evidence = json!({
@@ -1137,7 +1136,7 @@ Return one JSON object with:
     let raw_text = state
         .chat_engine
         .clone()
-        .generate_instruct_text(system_prompt, user_prompt, request.max_tokens.unwrap_or(384).min(1024))
+        .generate_instruct_text(system_prompt, user_prompt, max_tokens.unwrap_or(384).min(1024))
         .await
         .map_err(|err| err.to_string())?;
     let parsed = parse_first_json_object(&raw_text);
@@ -1148,7 +1147,7 @@ Return one JSON object with:
         raw_text,
         parsed,
         provenance: json!({
-            "documentId": request.document_id,
+            "documentId": document_id,
             "preferenceCount": preferences.len(),
             "createdAt": now_ts(),
             "reviewGated": true
@@ -1256,6 +1255,17 @@ async fn settings_save(
     state: State<'_, AppState>,
     config: crate::state::AppConfig,
 ) -> Result<ApiResult<EmptyOk>, String> {
+    // Validate settings before saving
+    if config.generation_temp < 0.0 || config.generation_temp > 2.0 {
+        return Ok(err_result("INVALID_TEMP", "Temperature must be between 0.0 and 2.0", true));
+    }
+    if config.safety_confidence_pct < 40 || config.safety_confidence_pct > 99 {
+        return Ok(err_result("INVALID_CONFIDENCE", "Safety confidence must be between 40 and 99", true));
+    }
+    if config.bm25_top_k < 1 || config.bm25_top_k > 50 {
+        return Ok(err_result("INVALID_TOP_K", "BM25 top K must be between 1 and 50", true));
+    }
+
     // Persist immediately to disk so a crash doesn't lose the new config.
     {
         let dirs_guard = state.dirs.lock().unwrap();
@@ -1263,6 +1273,7 @@ async fn settings_save(
             if let Ok(json) = serde_json::to_string_pretty(&config) {
                 if let Err(e) = std::fs::write(dirs.config_json(), &json) {
                     tracing::error!("settings_save: write failed: {e}");
+                    return Ok(err_result("WRITE_FAILED", format!("Failed to save config: {}", e), true));
                 }
             }
         }

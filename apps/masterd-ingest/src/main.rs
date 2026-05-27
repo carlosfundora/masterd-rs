@@ -120,6 +120,7 @@ impl AtomicHashIndexService {
             })?;
         }
         let start = SystemTime::now();
+        let mut attempt = 0;
         loop {
             match OpenOptions::new()
                 .write(true)
@@ -144,13 +145,27 @@ impl AtomicHashIndexService {
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                     let waited = start.elapsed().unwrap_or_default();
                     if waited >= self.lock_timeout {
+                        // Attempt to clean up stale lock
+                        if let Ok(metadata) = std::fs::metadata(&self.lock_path) {
+                            if let Ok(modified) = metadata.modified() {
+                                if let Ok(stale_duration) = SystemTime::now().duration_since(modified) {
+                                    if stale_duration > self.lock_timeout {
+                                        let _ = std::fs::remove_file(&self.lock_path);
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
                         return Err(anyhow::anyhow!(
                             "timed out waiting for hash-index lock {} after {:?}",
                             self.lock_path.display(),
                             waited
                         ));
                     }
-                    thread::sleep(self.lock_retry_interval);
+                    let base_ms = self.lock_retry_interval.as_millis() as u64;
+                    let backoff = std::cmp::min(100, base_ms * (2_u64.pow(attempt)));
+                    thread::sleep(Duration::from_millis(backoff));
+                    attempt += 1;
                 }
                 Err(err) => {
                     return Err(err).with_context(|| {

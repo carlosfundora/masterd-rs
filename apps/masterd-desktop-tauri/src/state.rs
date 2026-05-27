@@ -1,6 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use chrono::Local;
 
 use masterd_chat_engine::{ChatEngine, ChatEngineConfig, ChatSession};
 use masterd_data::{DataStore, DataStoreConfig};
@@ -200,6 +201,25 @@ pub struct AppState {
     pub data_store: std::sync::Mutex<Option<DataStore>>,
 }
 
+impl Clone for AppState {
+    fn clone(&self) -> Self {
+        let dirs = self.dirs.lock().ok().and_then(|g| g.clone());
+        let data_store = self.data_store.lock().ok().and_then(|g| g.clone());
+        Self {
+            chat_engine: self.chat_engine.clone(),
+            sessions: self.sessions.clone(),
+            watch_folders: self.watch_folders.clone(),
+            intake_queue: self.intake_queue.clone(),
+            config: self.config.clone(),
+            dirs: std::sync::Mutex::new(dirs),
+            data_store: std::sync::Mutex::new(data_store),
+        }
+    }
+}
+
+unsafe impl Send for AppState {}
+unsafe impl Sync for AppState {}
+
 impl AppState {
     pub fn new() -> Self {
         let config = ChatEngineConfig::default();
@@ -329,8 +349,5 @@ impl AppState {
 }
 
 fn chrono_like_now() -> String {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis().to_string())
-        .unwrap_or_default()
+    Local::now().to_rfc3339()
 }

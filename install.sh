@@ -78,10 +78,19 @@ if ! "${VENV_PYTHON}" -c "import huggingface_hub" >/dev/null 2>&1; then
 
   if [[ -n "${UV_BIN}" ]]; then
     env -u UV_EXTRA_INDEX_URL -u UV_INDEX_URL -u UV_CONSTRAINT "${UV_BIN}" pip install --python "${VENV_PYTHON}" huggingface-hub
+    if [ $? -ne 0 ]; then
+      die "Failed to install huggingface-hub with uv"
+    fi
   else
     "${VENV_PYTHON}" -m ensurepip --upgrade >/dev/null 2>&1 || true
     env -u PIP_EXTRA_INDEX_URL -u PIP_INDEX_URL -u PIP_CONSTRAINT "${VENV_PYTHON}" -m pip install --upgrade pip setuptools wheel
+    if [ $? -ne 0 ]; then
+      die "Failed to upgrade pip/setuptools/wheel"
+    fi
     env -u PIP_EXTRA_INDEX_URL -u PIP_INDEX_URL -u PIP_CONSTRAINT "${VENV_PYTHON}" -m pip install huggingface-hub
+    if [ $? -ne 0 ]; then
+      die "Failed to install huggingface-hub with pip"
+    fi
   fi
 fi
 
