@@ -10,8 +10,8 @@
 #   qwen3-service    — Qwen3-Embedding (port 11502)
 #
 # Prerequisites:
-#   - uv installed and on PATH  (https://docs.astral.sh/uv/)
 #   - Python 3.12 available
+#   - uv is preferred; the script bootstraps it or falls back to venv+pip
 #   - AMD ROCm 6.x or 7.x runtime (rocm-smi should show the GPU)
 #
 # Usage:
@@ -57,6 +57,73 @@ success() { printf "%b[setup-embed]%b %s\n" "${GREEN}" "${RESET}" "$*"; }
 warn()    { printf "%b[setup-embed]%b %s\n" "${YELLOW}" "${RESET}" "$*"; }
 die()     { printf "%b[setup-embed] ERROR:%b %s\n" "${RED}" "${RESET}" "$*" >&2; exit 1; }
 
+ensure_uv() {
+  export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+  if command -v uv >/dev/null 2>&1; then
+    UV_BIN="$(command -v uv)"
+    return 0
+  fi
+
+  warn "uv not found; attempting to install uv for this user"
+  if command -v curl >/dev/null 2>&1; then
+    if curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1; then
+      export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+      if command -v uv >/dev/null 2>&1; then
+        UV_BIN="$(command -v uv)"
+        success "uv installed at ${UV_BIN}"
+        return 0
+      fi
+    fi
+    warn "uv install script did not provide a usable uv binary; trying pip"
+  fi
+
+  if "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1 || "${PYTHON_BIN}" -m ensurepip --upgrade >/dev/null 2>&1; then
+    if "${PYTHON_BIN}" -m pip install --user --upgrade uv >/dev/null 2>&1; then
+      export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+      if command -v uv >/dev/null 2>&1; then
+        UV_BIN="$(command -v uv)"
+        success "uv installed at ${UV_BIN}"
+        return 0
+      fi
+    fi
+  fi
+
+  UV_BIN=""
+  warn "uv is unavailable; falling back to python -m venv and pip"
+  return 0
+}
+
+create_venv() {
+  local venv_dir="$1"
+  if [[ -n "${UV_BIN}" ]]; then
+    "${UV_BIN}" venv --python "${PYTHON_BIN}" "${venv_dir}"
+  else
+    "${PYTHON_BIN}" -m venv "${venv_dir}"
+  fi
+}
+
+install_requirements() {
+  local venv_python="$1"
+  local reqs_file="$2"
+
+  if [[ -n "${UV_BIN}" ]]; then
+    "${UV_BIN}" pip install \
+      --python "${venv_python}" \
+      --constraint "${ROCM_CONSTRAINTS}" \
+      --extra-index-url "${ROCM_TORCH_INDEX}" \
+      --extra-index-url "${ROCM_STABLE_INDEX}" \
+      -r "${reqs_file}"
+  else
+    "${venv_python}" -m ensurepip --upgrade >/dev/null 2>&1 || true
+    "${venv_python}" -m pip install --upgrade pip setuptools wheel
+    "${venv_python}" -m pip install \
+      --constraint "${ROCM_CONSTRAINTS}" \
+      --extra-index-url "${ROCM_TORCH_INDEX}" \
+      --extra-index-url "${ROCM_STABLE_INDEX}" \
+      -r "${reqs_file}"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --service)
@@ -97,9 +164,10 @@ case "${TARGET_SERVICE}" in
 esac
 
 # Validate environment before touching anything.
-command -v uv >/dev/null 2>&1    || die "uv not found. Install via: curl -LsSf https://astral.sh/uv/install.sh | sh"
 command -v "${PYTHON_BIN}" >/dev/null 2>&1 || die "${PYTHON_BIN} not found. Install Python 3.12."
 [[ -f "${ROCM_CONSTRAINTS}" ]]    || die "ROCm constraints file missing: ${ROCM_CONSTRAINTS}"
+UV_BIN=""
+ensure_uv
 
 PYTHON_VER="$("${PYTHON_BIN}" --version 2>&1)"
 info "Using ${PYTHON_VER}"
@@ -117,19 +185,14 @@ setup_venv() {
   mkdir -p "${SERVICES_DIR}/${name}"
 
   if [[ ! -d "${venv_dir}" ]]; then
-    uv venv --python "${PYTHON_BIN}" "${venv_dir}"
+    create_venv "${venv_dir}"
   else
     warn "  venv already exists, skipping creation"
   fi
 
   if [[ -f "${reqs_file}" ]]; then
     info "  Installing from ${reqs_file} (ROCm index enforced)..."
-    uv pip install \
-      --python "${venv_dir}/bin/python" \
-      --constraint "${ROCM_CONSTRAINTS}" \
-      --extra-index-url "${ROCM_TORCH_INDEX}" \
-      --extra-index-url "${ROCM_STABLE_INDEX}" \
-      -r "${reqs_file}"
+    install_requirements "${venv_dir}/bin/python" "${reqs_file}"
     success "  ${name} packages installed."
   else
     warn "  No requirements.txt found at ${reqs_file} — skipping package install."
