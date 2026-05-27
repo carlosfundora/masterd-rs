@@ -137,6 +137,7 @@ logo_line "${WHITE}" "  ORGANIZE OR BE ORGANIZED."
 printf "%b╚%s╝%b\n" "${RED}" "${HBAR}" "${RESET}"
 
 ensure_source_build_tools
+masterd_resolve_python "${ROOT_DIR}"
 play_boot_midi
 
 # ── Model asset install ───────────────────────────────────────────────────
