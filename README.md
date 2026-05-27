@@ -82,9 +82,11 @@ vendor/
 git clone https://github.com/carlosfundora/masterd-rs
 cd masterd-rs
 
-# 2. Download model weights and tokenizers from Hugging Face
+# 2. Provide a Hugging Face token for gated Liquid AI model repos
 #    (GGUF files are not stored in git — too large)
 export HF_TOKEN=hf_your_token_here  # required for gated Liquid AI repos
+
+# Optional: pre-download model weights and tokenizers now
 ./scripts/download-models.sh
 
 # Optional: verify existing local model files without downloading
@@ -93,7 +95,8 @@ export HF_TOKEN=hf_your_token_here  # required for gated Liquid AI repos
 # 3. Bootstrap: validates sidecar config and creates first-launch directories
 cargo run -p masterd-bootstrap
 
-# 4. Build the full installer bundle (downloads Meilisearch + Valkey)
+# 4. Build the full installer bundle
+#    Runs model install/verification first, then sidecars, frontend, and Tauri.
 ./scripts/build-installer-bundles.sh
 
 # — OR — run the desktop app directly in dev mode:
@@ -125,6 +128,9 @@ The embedding services run as separate HTTP processes. All installs are routed t
 ```bash
 # Set up all three service venvs (Python 3.12 + ROCm torch)
 ./scripts/setup-embedding-services.sh all
+
+# Or include this optional setup in the main installer sequence:
+MASTERD_SETUP_EMBEDDING_SERVICES=1 ./scripts/build-installer-bundles.sh
 
 # Start a service
 services/colbert-service/.venv/bin/python services/colbert-service/server.py
@@ -322,6 +328,12 @@ Build installer bundle:
 cd /home/local/ai/projects/MASTERd
 ./scripts/build-installer-bundles.sh
 ```
+
+Installer sequence:
+1. Launch boot MIDI unless `MASTERD_NO_MUSIC=1`.
+2. Run `scripts/download-models.sh` unless `MASTERD_SKIP_MODEL_DOWNLOAD=1`.
+3. Optionally run `scripts/setup-embedding-services.sh all` when `MASTERD_SETUP_EMBEDDING_SERVICES=1`.
+4. Download/build sidecars, build the Next shell, and package Tauri.
 
 ## Boot screen + Rust music
 
