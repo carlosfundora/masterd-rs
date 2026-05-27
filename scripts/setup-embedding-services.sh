@@ -94,12 +94,19 @@ install_requirements() {
   venv_dir="$(dirname "$(dirname "${venv_python}")")"
 
   # Detect if we should use the local ROCm venv bridge (to speed up testing/validation on this host)
-  local canonical_venv="/home/local/Projects/venvs/.venv-pytorch-rocm-72"
-  if [[ -d "${canonical_venv}" ]]; then
-    info "  Local canonical ROCm venv detected. Activating bridge link..."
+  local bridge_src=""
+  for dir in "/usr/local/lib/python3.12/dist-packages" "/usr/lib/python3/dist-packages" "/home/local/.venv-bridges/.venv-py312/lib/python3.12/site-packages" "/home/local/Projects/venvs/.venv-pytorch-rocm-72/lib/python3.12/site-packages"; do
+    if [[ -d "${dir}/torch" ]]; then
+      bridge_src="${dir}"
+      break
+    fi
+  done
+
+  if [[ -n "${bridge_src}" ]]; then
+    info "  Local canonical ROCm PyTorch detected at ${bridge_src}. Activating bridge link..."
     local sp_dir="${venv_dir}/lib/python3.12/site-packages"
     mkdir -p "${sp_dir}"
-    echo "${canonical_venv}/lib/python3.12/site-packages" > "${sp_dir}/bridge.pth"
+    echo "${bridge_src}" > "${sp_dir}/bridge.pth"
     
     # Filter torch, triton, colbert-ai, and sentence-transformers to temp_reqs
     local temp_reqs
