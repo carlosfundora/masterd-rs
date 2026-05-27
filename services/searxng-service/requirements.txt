@@ -1,2 +1,3 @@
+# SearXNG itself is installed from the pinned source checkout by
+# scripts/setup-searxng-service.sh.
 pyyaml
-searxng

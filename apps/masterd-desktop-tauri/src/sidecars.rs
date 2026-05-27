@@ -10,6 +10,7 @@
 //!   <resource_dir>/bin/valkey-server
 //!   <resource_dir>/bin/falkordb-server
 //!   <resource_dir>/modules/falkordb.so
+//!   <resource_dir>/services/searxng-service/.venv/bin/python
 //!
 //! Data directories are provisioned inside the app's data_dir:
 //!   <data_dir>/meilisearch/
@@ -71,6 +72,7 @@ impl SidecarSupervisor {
         self.start_meilisearch(resource_dir, data_dir);
         self.start_valkey(resource_dir, data_dir);
         self.start_falkordb(resource_dir, data_dir);
+        self.start_searxng(resource_dir);
         self.start_python_services();
     }
 
@@ -118,6 +120,54 @@ impl SidecarSupervisor {
             }
             Err(e) => {
                 warn!("failed to start {name}: {e}");
+            }
+        }
+    }
+
+    fn start_searxng(&self, resource_dir: &Path) {
+        let procs = self.procs.lock().unwrap();
+        if procs.iter().any(|p| p.name == "searxng-service") {
+            return;
+        }
+        drop(procs);
+
+        let packaged = resource_dir.join("services").join("searxng-service");
+        let workspace = find_workspace_root().map(|root| root.join("services").join("searxng-service"));
+        let service_dir = if packaged.join("start.py").exists() {
+            packaged
+        } else if let Some(workspace) = workspace {
+            workspace
+        } else {
+            info!("searxng-service not found in resources or workspace, skipping");
+            return;
+        };
+
+        let bin = service_dir.join(".venv").join("bin").join("python");
+        let script = service_dir.join("start.py");
+        let settings = service_dir.join("settings.yml");
+        if !bin.exists() {
+            warn!("SearXNG python binary not found at {}, skipping web search sidecar", bin.display());
+            return;
+        }
+        if !script.exists() {
+            warn!("SearXNG launcher not found at {}, skipping web search sidecar", script.display());
+            return;
+        }
+
+        let child = Command::new(&bin)
+            .arg(&script)
+            .env("SEARXNG_SETTINGS_PATH", settings)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+
+        match child {
+            Ok(c) => {
+                info!("searxng-service started on 127.0.0.1:9265");
+                self.procs.lock().unwrap().push(ManagedProcess { name: "searxng-service", child: c });
+            }
+            Err(e) => {
+                warn!("failed to start searxng-service: {e}");
             }
         }
     }

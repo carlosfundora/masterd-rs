@@ -37,7 +37,8 @@
       "binaries/meilisearch": "bin/meilisearch",
       "binaries/valkey-server": "bin/valkey-server",
       "binaries/falkordb-server": "bin/falkordb-server",
-      "modules/falkordb.so": "modules/falkordb.so"
+      "modules/falkordb.so": "modules/falkordb.so",
+      "../../services/searxng-service": "services/searxng-service"
     },
     "icon": [
       "icons/icon.png"

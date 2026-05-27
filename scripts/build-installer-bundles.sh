@@ -157,6 +157,14 @@ else
   printf "%b║%b  Embedding service environments ready.%b\n" "${RED}" "${GREEN}" "${RESET}"
 fi
 
+if [[ "${MASTERD_SKIP_SEARXNG:-0}" == "1" ]]; then
+  printf "%b║%b  Skipping SearXNG setup (MASTERD_SKIP_SEARXNG=1).%b\n" "${RED}" "${YELLOW}" "${RESET}"
+else
+  printf "%b║%b  Setting up bundled SearXNG web search service...%b\n" "${RED}" "${CYAN}" "${RESET}"
+  "${ROOT_DIR}/scripts/setup-searxng-service.sh"
+  printf "%b║%b  SearXNG web search service ready.%b\n" "${RED}" "${GREEN}" "${RESET}"
+fi
+
 # ── Sidecar binary download ────────────────────────────────────────────────
 ARCH="$(uname -m)"
 case "${ARCH}" in
