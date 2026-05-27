@@ -1,0 +1,12 @@
+{
+  "inference_ok": true,
+  "retrieval_ok": true,
+  "thinking_ok": true,
+  "inferred_tokens_per_sec": 74639.39840644885,
+  "notes": [
+    "backend=Direct",
+    "inference dims: jina=384",
+    "retrieval returned 3 rerank results",
+    "thinking response synthesized in direct mode (has_think_tags=true, chars=137)"
+  ]
+}

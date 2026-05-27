@@ -1,9 +1,0 @@
-# Qwen3-Embedding service for MASTERd (port 11502)
-# Packages installed from ROCm PyTorch index (no CUDA wheels).
-torch
-fastapi
-uvicorn[standard]
-transformers
-sentencepiece
-huggingface-hub
-safetensors
