@@ -220,6 +220,9 @@ impl SidecarSupervisor {
 
         let child = Command::new(&bin)
             .arg(&script)
+            .env("MASTERD_RESOURCE_DIR", trust_root)
+            .env("MASTERD_INSTALL_ROOT", trust_root)
+            .env("MASTERD_MODELS_DIR", trust_root.join("models"))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();

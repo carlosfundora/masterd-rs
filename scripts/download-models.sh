@@ -43,13 +43,16 @@ HF_TOKEN="${HF_TOKEN:-}"
 FORCE="${FORCE:-0}"
 VERIFY_ONLY="${VERIFY_ONLY:-0}"
 
-for arg in "$@"; do
+while (($#)); do
+  arg="$1"
   case "${arg}" in
     --skip-chat)    SKIP_CHAT=1 ;;
     --skip-colbert) SKIP_COLBERT=1 ;;
     --jina-v5-size)
+      [[ $# -ge 2 ]] || die "--jina-v5-size requires one of: both, nano, small"
       JINA_V5_SIZE="$2"
       shift 2
+      continue
       ;;
     --force)        FORCE=1 ;;
     --verify-only)  VERIFY_ONLY=1 ;;
@@ -70,7 +73,13 @@ for arg in "$@"; do
       fi
       ;;
   esac
+  shift
 done
+
+case "${JINA_V5_SIZE}" in
+  nano|small|both) ;;
+  *) die "invalid --jina-v5-size: ${JINA_V5_SIZE}. Use both, nano, or small." ;;
+esac
 
 is_lfs_pointer() {
   local path="$1"
@@ -296,13 +305,35 @@ if [[ "${SKIP_COLBERT}" == "0" ]]; then
 fi
 
 if [[ "${JINA_V5_SIZE}" == "small" || "${JINA_V5_SIZE}" == "both" ]]; then
-  info "── Downloading Jina v5 Omni Small (dense embedding model) ─────────────────────"
-  hf_snapshot_download "jinaai/jina-embeddings-v5-omni-small" "${ROOT_DIR}/models/jina-v5-omni-small" "Jina v5 Omni Small"
+  info "── Downloading Jina v5 Omni Small GGUF (dense embedding model) ─────────"
+  hf_download \
+    "jinaai/jina-embeddings-v5-omni-small-retrieval-GGUF" \
+    "jina-embeddings-v5-omni-small-retrieval-Q4_K_M.gguf" \
+    "${ROOT_DIR}/models/jina-v5-omni-small-gguf/retrieval/model-Q4_K_M.gguf" \
+    300000000 \
+    "Jina v5 Omni Small retrieval Q4_K_M GGUF"
+  hf_download \
+    "jinaai/jina-embeddings-v5-omni-small-text-matching-GGUF" \
+    "jina-embeddings-v5-omni-small-text-matching-Q4_K_M.gguf" \
+    "${ROOT_DIR}/models/jina-v5-omni-small-gguf/text-matching/model-Q4_K_M.gguf" \
+    300000000 \
+    "Jina v5 Omni Small text-matching Q4_K_M GGUF"
 fi
 
 if [[ "${JINA_V5_SIZE}" == "nano" || "${JINA_V5_SIZE}" == "both" ]]; then
-  info "── Downloading Jina v5 Omni Nano (dense embedding model) ─────────────────────"
-  hf_snapshot_download "jinaai/jina-embeddings-v5-omni-nano" "${ROOT_DIR}/models/jina-v5-omni-nano" "Jina v5 Omni Nano"
+  info "── Downloading Jina v5 Omni Nano GGUF (dense embedding model) ──────────"
+  hf_download \
+    "jinaai/jina-embeddings-v5-omni-nano-retrieval-GGUF" \
+    "jina-embeddings-v5-omni-nano-retrieval-Q4_K_M.gguf" \
+    "${ROOT_DIR}/models/jina-v5-omni-nano-gguf/retrieval/model-Q4_K_M.gguf" \
+    100000000 \
+    "Jina v5 Omni Nano retrieval Q4_K_M GGUF"
+  hf_download \
+    "jinaai/jina-embeddings-v5-omni-nano-text-matching-GGUF" \
+    "jina-embeddings-v5-omni-nano-text-matching-Q4_K_M.gguf" \
+    "${ROOT_DIR}/models/jina-v5-omni-nano-gguf/text-matching/model-Q4_K_M.gguf" \
+    100000000 \
+    "Jina v5 Omni Nano text-matching Q4_K_M GGUF"
 fi
 
 # ── Copy models to embedded assets location ───────────────────────────────
@@ -355,6 +386,28 @@ if [[ "${SKIP_COLBERT}" == "0" ]]; then
     "${ROOT_DIR}/models/lfm2-colbert-350m/tokenizer.json" \
     1000000 \
     "LFM2-ColBERT-350M tokenizer"
+fi
+
+if [[ "${JINA_V5_SIZE}" == "small" || "${JINA_V5_SIZE}" == "both" ]]; then
+  verify_file \
+    "${ROOT_DIR}/models/jina-v5-omni-small-gguf/retrieval/model-Q4_K_M.gguf" \
+    300000000 \
+    "Jina v5 Omni Small retrieval Q4_K_M GGUF"
+  verify_file \
+    "${ROOT_DIR}/models/jina-v5-omni-small-gguf/text-matching/model-Q4_K_M.gguf" \
+    300000000 \
+    "Jina v5 Omni Small text-matching Q4_K_M GGUF"
+fi
+
+if [[ "${JINA_V5_SIZE}" == "nano" || "${JINA_V5_SIZE}" == "both" ]]; then
+  verify_file \
+    "${ROOT_DIR}/models/jina-v5-omni-nano-gguf/retrieval/model-Q4_K_M.gguf" \
+    100000000 \
+    "Jina v5 Omni Nano retrieval Q4_K_M GGUF"
+  verify_file \
+    "${ROOT_DIR}/models/jina-v5-omni-nano-gguf/text-matching/model-Q4_K_M.gguf" \
+    100000000 \
+    "Jina v5 Omni Nano text-matching Q4_K_M GGUF"
 fi
 
 success ""

@@ -9,6 +9,17 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP_VENV="${ROOT_DIR}/.venv-bootstrap"
+MODEL_DOWNLOAD_SCRIPT="${ROOT_DIR}/scripts/download-models.sh"
+
+# The main installer delegates model transfer to scripts/download-models.sh.
+# Keep the required release Jina v5 GGUF repos visible here so install-time
+# drift is caught before the recursive bootstrap starts.
+REQUIRED_JINA_V5_GGUF_REPOS=(
+  "jinaai/jina-embeddings-v5-omni-nano-retrieval-GGUF"
+  "jinaai/jina-embeddings-v5-omni-nano-text-matching-GGUF"
+  "jinaai/jina-embeddings-v5-omni-small-retrieval-GGUF"
+  "jinaai/jina-embeddings-v5-omni-small-text-matching-GGUF"
+)
 
 # Terminal colors
 RED=$'\033[38;5;196m'
@@ -23,6 +34,16 @@ warn()    { printf "%b[install.sh]%b %s\n" "${YELLOW}" "${RESET}" "$*"; }
 die()     { printf "%b[install.sh] ERROR:%b %s\n" "${RED}" "${RESET}" "$*" >&2; exit 1; }
 
 info "Starting recursive installation for MASTERd..."
+
+if [[ ! -x "${MODEL_DOWNLOAD_SCRIPT}" ]]; then
+  die "Model download script is missing or not executable: ${MODEL_DOWNLOAD_SCRIPT}"
+fi
+for repo in "${REQUIRED_JINA_V5_GGUF_REPOS[@]}"; do
+  if ! grep -Fq "${repo}" "${MODEL_DOWNLOAD_SCRIPT}"; then
+    die "Model download script is missing required Jina v5 GGUF repo: ${repo}"
+  fi
+done
+info "Verified Jina v5 GGUF model download URLs in scripts/download-models.sh"
 
 # Ensure we have python3
 PYTHON_BIN=""

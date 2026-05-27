@@ -42,7 +42,9 @@
       "../../services/searxng-service": "services/searxng-service",
       "../../services/colbert-service": "services/colbert-service",
       "../../services/jina-service": "services/jina-service",
-      "../../services/jina-v5-service": "services/jina-v5-service"
+      "../../services/jina-v5-service": "services/jina-v5-service",
+      "../../models/jina-v5-omni-nano-gguf": "models/jina-v5-omni-nano-gguf",
+      "../../models/jina-v5-omni-small-gguf": "models/jina-v5-omni-small-gguf"
     },
     "icon": [
       "icons/icon.png"

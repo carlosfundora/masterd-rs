@@ -120,6 +120,7 @@ pub enum ModelAssetFormat {
 #[serde(rename_all = "snake_case")]
 pub enum PreferredRuntime {
     RustCandleGguf,
+    LlamaCppGgufSidecar,
     PythonTransformersSidecar,
 }
 
@@ -169,22 +170,22 @@ pub const MASTERD_MODEL_RUNTIME_SPECS: &[MasterdModelRuntimeSpec] = &[
     MasterdModelRuntimeSpec {
         id: "jina-v5-omni-nano",
         role: ModelRuntimeRole::DenseEmbedding,
-        asset_format: ModelAssetFormat::Safetensors,
-        preferred_runtime: PreferredRuntime::PythonTransformersSidecar,
-        model_dir: "models/jina-v5-omni-nano",
-        weights: "model.safetensors",
+        asset_format: ModelAssetFormat::Gguf,
+        preferred_runtime: PreferredRuntime::LlamaCppGgufSidecar,
+        model_dir: "models/jina-v5-omni-nano-gguf/retrieval",
+        weights: "model-Q4_K_M.gguf",
         tokenizer: "tokenizer.json",
-        min_weight_bytes: 1_500_000_000,
+        min_weight_bytes: 100_000_000,
     },
     MasterdModelRuntimeSpec {
         id: "jina-v5-omni-small",
         role: ModelRuntimeRole::DenseEmbedding,
-        asset_format: ModelAssetFormat::Safetensors,
-        preferred_runtime: PreferredRuntime::PythonTransformersSidecar,
-        model_dir: "models/jina-v5-omni-small",
-        weights: "model.safetensors",
+        asset_format: ModelAssetFormat::Gguf,
+        preferred_runtime: PreferredRuntime::LlamaCppGgufSidecar,
+        model_dir: "models/jina-v5-omni-small-gguf/retrieval",
+        weights: "model-Q4_K_M.gguf",
         tokenizer: "tokenizer.json",
-        min_weight_bytes: 2_500_000_000,
+        min_weight_bytes: 300_000_000,
     },
 ];
 
@@ -400,16 +401,15 @@ mod tests {
     }
 
     #[test]
-    fn runtime_specs_keep_jina_python_until_native_runner_exists() {
+    fn runtime_specs_point_jina_at_packaged_gguf_assets() {
         let jina = MASTERD_MODEL_RUNTIME_SPECS
             .iter()
             .find(|spec| spec.id == "jina-v5-omni-nano")
             .expect("jina spec");
-        assert_eq!(jina.asset_format, ModelAssetFormat::Safetensors);
-        assert_eq!(
-            jina.preferred_runtime,
-            PreferredRuntime::PythonTransformersSidecar
-        );
+        assert_eq!(jina.asset_format, ModelAssetFormat::Gguf);
+        assert_eq!(jina.preferred_runtime, PreferredRuntime::LlamaCppGgufSidecar);
+        assert_eq!(jina.model_dir, "models/jina-v5-omni-nano-gguf/retrieval");
+        assert_eq!(jina.weights, "model-Q4_K_M.gguf");
     }
 
     #[test]
