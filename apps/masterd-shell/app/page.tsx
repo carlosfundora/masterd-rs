@@ -139,7 +139,8 @@ export default function Home() {
     if (typeof window === "undefined") return;
 
     const completed = window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === "true";
-    setTutorialOpen(!completed);
+    const timer = window.setTimeout(() => setTutorialOpen(!completed), 0);
+    return () => window.clearTimeout(timer);
   }, [initLoaded, runtimeError]);
 
   const closeTutorial = useCallback(() => {
@@ -153,12 +154,6 @@ export default function Home() {
     setTutorialStep(0);
     setTutorialOpen(true);
   }, []);
-
-  const activeWatchFolders: WatchFolder[] = watchFolders.length > 0 ? watchFolders : [
-    { id: "wf-1", path: "/Users/username/Desktop/Tax2025", enabled: true, profileId: "Receipts & Financial Docs", fileCount: 28, createdAt: "" },
-    { id: "wf-2", path: "/Users/username/Downloads/Invoices", enabled: true, profileId: "Fast Scan", fileCount: 114, createdAt: "" },
-    { id: "wf-3", path: "/Users/username/Documents/ScannedCorrespondence", enabled: false, profileId: "Full Analysis", fileCount: 8, createdAt: "" }
-  ];
 
   const errorCount = intakeQueue.filter(item => item.status === "error").length;
   const pendingReviewCount = reviewQueue.filter(r => !r.resolved).length;
@@ -388,7 +383,7 @@ export default function Home() {
                   <Dashboard status={status} health={health} documents={documents} reviewQueue={reviewQueue} setActiveTab={setActiveTab} setSelectedDocument={setSelectedDocument} />
                 )}
                 {activeTab === "intake" && (
-                  <Intake intakeQueue={intakeQueue} watchFolders={activeWatchFolders} refreshState={() => refreshState()} />
+                  <Intake intakeQueue={intakeQueue} watchFolders={watchFolders} refreshState={() => refreshState()} />
                 )}
                 {activeTab === "documents" && (
                   <Documents bridge={bridge} documents={documents} selectedDocument={selectedDocument} setSelectedDocument={setSelectedDocument} refreshState={() => refreshState()} />
@@ -425,7 +420,7 @@ export default function Home() {
               </span>
               <span>|</span>
               <span className="hidden sm:inline-block">
-                WATCHERS: <span className="text-[#fca5a5]">{activeWatchFolders.filter((w: WatchFolder) => w.enabled).length} ACTIVE</span>
+                WATCHERS: <span className="text-[#fca5a5]">{watchFolders.filter((w: WatchFolder) => w.enabled).length} ACTIVE</span>
               </span>
             </div>
 

@@ -128,19 +128,19 @@ export default function Dashboard({
           <div id="pipeline-timeline-flow" className="pt-4 pb-2">
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
               {[
-                { stage: "Ingest", desc: "Watch / Import", color: "bg-[#7f1d1d]", border: 'border-[#7f1d1d]', active: true },
-                { stage: "Hash", desc: "SHA-256 Check", color: "bg-[#7f1d1d]", border: 'border-[#7f1d1d]', active: true },
-                { stage: "Dedupe", desc: "Index Match", color: "bg-[#fca5a5]", border: 'border-[#fca5a5]', active: true, pulse: true },
-                { stage: "Extract", desc: "Parser Engine", color: "bg-[#27272a]", border: 'border-[#27272a]', active: false },
-                { stage: "Classify", desc: "Routing Rules", color: "bg-[#27272a]", border: 'border-[#27272a]', active: false },
-                { stage: "Rename", desc: "Naming Policy", color: "bg-[#27272a]", border: 'border-[#27272a]', active: false },
-                { stage: "Storage", desc: "Local Archive", color: "bg-[#27272a]", border: 'border-[#27272a]', active: false },
+                { stage: "Ingest", desc: "Watch / Import", color: "bg-[#7f1d1d]", border: 'border-[#7f1d1d]' },
+                { stage: "Hash", desc: "SHA-256 Check", color: "bg-[#7f1d1d]", border: 'border-[#7f1d1d]' },
+                { stage: "Dedupe", desc: "Index Match", color: "bg-[#fca5a5]", border: 'border-[#fca5a5]' },
+                { stage: "Extract", desc: "Parser Engine", color: "bg-[#27272a]", border: 'border-[#27272a]' },
+                { stage: "Classify", desc: "Routing Rules", color: "bg-[#27272a]", border: 'border-[#27272a]' },
+                { stage: "Rename", desc: "Naming Policy", color: "bg-[#27272a]", border: 'border-[#27272a]' },
+                { stage: "Storage", desc: "Local Archive", color: "bg-[#27272a]", border: 'border-[#27272a]' },
               ].map((item, idx) => (
                 <div key={idx} className="relative flex flex-col justify-between p-2.5 bg-[#05070A] border border-[#183040] rounded-[4px]">
                   <div>
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-mono text-[#6C8798]">S-0{idx+1}</span>
-                      <div className={`w-2 h-2 rounded-full ${item.color} ${item.pulse ? 'animate-ping' : ''}`} />
+                      <div className={`w-2 h-2 rounded-full ${item.color}`} />
                     </div>
                     <div className="text-xs font-semibold text-[#E6F7FF] mt-1.5">{item.stage}</div>
                     <div className="text-[10px] text-[#A7C7D9] mt-0.5">{item.desc}</div>
@@ -160,7 +160,7 @@ export default function Dashboard({
               <span className="w-2.5 h-2.5 rounded-full bg-[#7f1d1d] inline-block" /> Completed stage
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#fca5a5] inline-block animate-pulse" /> Actively running execution task
+              <span className="w-2.5 h-2.5 rounded-full bg-[#fca5a5] inline-block" /> Current processing stage
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-[#27272a] inline-block" /> Queued sequence code

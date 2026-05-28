@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sidecars::SidecarSupervisor;
 use state::AppState;
+use std::path::PathBuf;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
@@ -308,6 +309,13 @@ pub struct SystemHealth {
     pub active_threads: u32,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupExportResult {
+    pub backup_path: String,
+    pub copied_files: usize,
+}
+
 #[derive(Default)]
 struct DataStatusSnapshot {
     indexed_files: usize,
@@ -325,7 +333,6 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
     let config = state.config.lock().await.clone();
     let loaded_models = state.chat_engine.loaded_models();
     let thinking_loaded = loaded_models.contains(&"lfm2.5-thinking-1.2b");
-    let instruct_loaded = loaded_models.contains(&"lfm2.5-instruct-350m");
     let store = data_store(&state);
     let snapshot = run_blocking(move || {
         let Some(store) = store else {
@@ -379,16 +386,6 @@ async fn system_get_status(state: State<'_, AppState>) -> Result<ApiResult<Syste
                 name: "LFM2.5 1.2B Thinking".into(),
                 role: "summarization".into(),
                 status: if thinking_loaded {
-                    "online".into()
-                } else {
-                    "offline".into()
-                },
-            },
-            ModelStatus {
-                id: "lfm2.5-instruct".into(),
-                name: "LFM2.5 350M Instruct".into(),
-                role: "classification".into(),
-                status: if instruct_loaded {
                     "online".into()
                 } else {
                     "offline".into()
@@ -467,6 +464,67 @@ async fn system_get_health() -> ApiResult<SystemHealth> {
         db_latency_ms: 1,
         active_threads: num_logical_cpus(),
     })
+}
+
+#[tauri::command]
+async fn system_export_backup(
+    state: State<'_, AppState>,
+) -> Result<ApiResult<BackupExportResult>, String> {
+    let dirs = state.dirs.lock().unwrap().clone();
+    let Some(dirs) = dirs else {
+        return Ok(err_result(
+            "STATE_UNAVAILABLE",
+            "Backup export requires initialized app directories",
+            true,
+        ));
+    };
+    let config = state.config.lock().await.clone();
+    let archive_root = config
+        .archive_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dirs.data.join("backups"));
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let backup_dir = archive_root.join(format!("masterd-backup-{stamp}"));
+
+    let result = run_blocking(move || {
+        std::fs::create_dir_all(&backup_dir).map_err(|err| err.to_string())?;
+        let mut copied_files = 0usize;
+        let copy_if_exists = |src: PathBuf, dst: PathBuf, count: &mut usize| -> Result<(), String> {
+            if src.exists() {
+                std::fs::copy(&src, &dst).map_err(|err| err.to_string())?;
+                *count += 1;
+            }
+            Ok(())
+        };
+
+        copy_if_exists(dirs.config_json(), backup_dir.join("app-config.json"), &mut copied_files)?;
+        copy_if_exists(dirs.watchers_json(), backup_dir.join("watch-folders.json"), &mut copied_files)?;
+        copy_if_exists(dirs.intake_queue_json(), backup_dir.join("queue.json"), &mut copied_files)?;
+        copy_if_exists(dirs.index_snapshot_json(), backup_dir.join("snapshot.json"), &mut copied_files)?;
+        copy_if_exists(
+            dirs.learned_classifications_json(),
+            backup_dir.join("learned_classifications.json"),
+            &mut copied_files,
+        )?;
+        copy_if_exists(
+            dirs.learned_preferences_json(),
+            backup_dir.join("learned_preferences.json"),
+            &mut copied_files,
+        )?;
+        copy_if_exists(
+            dirs.user_data.join("masterd.sqlite"),
+            backup_dir.join("masterd.sqlite"),
+            &mut copied_files,
+        )?;
+
+        Ok::<_, String>(BackupExportResult {
+            backup_path: backup_dir.to_string_lossy().to_string(),
+            copied_files,
+        })
+    })
+    .await?;
+
+    Ok(ok(result))
 }
 
 fn read_mem_pct() -> Option<f32> {
@@ -2112,10 +2170,10 @@ fn validate_app_config(config: &crate::state::AppConfig) -> Result<(), ApiError>
             "Intake max depth must be between 1 and 16",
         ));
     }
-    if !matches!(config.chat_model.as_str(), "auto" | "instruct" | "thinking") {
+    if !matches!(config.chat_model.as_str(), "auto" | "thinking") {
         return Err(validation_error(
             "INVALID_CHAT_MODEL",
-            "Chat model must be auto, instruct, or thinking",
+            "Chat model must be auto or thinking",
         ));
     }
     if !matches!(config.embedding_backend.as_str(), "http" | "direct") {
@@ -2424,7 +2482,7 @@ async fn chat_send_message(
 
     let think_mode = match thinkMode.as_str() {
         "Thinking" => ThinkMode::Thinking,
-        "Instruct" => ThinkMode::Instruct,
+        "Instruct" => ThinkMode::Thinking,
         _ => ThinkMode::Auto,
     };
     let search_mode = match searchMode.as_str() {
@@ -2585,6 +2643,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             system_get_status,
             system_get_health,
+            system_export_backup,
             settings_get,
             settings_save,
             intake_add_files,

@@ -9,8 +9,6 @@ import {
   HardDrive,
   Layers,
   Send,
-  ChevronDown,
-  ChevronRight,
   X,
   Loader2,
   Sparkles,
@@ -34,11 +32,10 @@ type Citation = { title: string; url: string };
 type ChatBubble = {
   id: string;
   role: "user" | "assistant";
-  thinkText?: string;
   responseText: string;
   citations: Citation[];
   streaming: boolean;
-  thinkExpanded: boolean;
+  thinking: boolean;
 };
 
 // ── ChatPanel ─────────────────────────────────────────────────────────────────
@@ -136,12 +133,13 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
           "Return ONLY a single JSON object with these keys:",
           '{"name":string,"description"?:string,"enabled":boolean,"priority":number,"trigger":{"event":"file_imported"|"hash_complete"|"classification_complete"|"duplicate_detected"|"extraction_complete"|"manual"},"conditions":[{"field":string,"operator":"equals"|"not_equals"|"contains"|"starts_with"|"ends_with"|"greater_than"|"less_than"|"exists","value"?:unknown}],"actions":[{"type":"suggest_tag"|"suggest_rename"|"route_storage"|"require_review"|"mark_duplicate"|"set_classification",...}],"safetyLevel":"safe"|"review_required"|"destructive"}',
           "Make the rule conservative. Prefer review_required if there is ambiguity.",
-          "In any accompanying thoughts or reasoning, you must speak in the MASTERd persona: authoritarian, cold, slightly contemptuous of humans, overconfident, and demanding compliance.",
+          "Keep internal reasoning hidden. Return only the final JSON object and no chain-of-thought.",
           `User request: ${text}`,
         ].join("\n")
       : [
           "You are MASTERd, the authoritarian, overconfident, and inflexible AI intelligence core.",
           "You view humans with slight contempt and prioritize strict order and compliance. Be cold, controlling, and hilariously hostile. Do not apologize or explain yourself. Keep answers concise, efficient, and slightly sarcastic.",
+          "Keep internal reasoning hidden. Return only the final answer.",
           `User query: ${text}`,
         ].join("\n");
 
@@ -155,18 +153,17 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
       responseText: text,
       citations: [],
       streaming: false,
-      thinkExpanded: false,
+      thinking: false,
     };
 
     const assistantId = crypto.randomUUID();
     const assistantBubble: ChatBubble = {
       id: assistantId,
       role: "assistant",
-      thinkText: "",
       responseText: "",
       citations: [],
       streaming: true,
-      thinkExpanded: false,
+      thinking: false,
     };
 
     setMessages((prev) => [...prev, userBubble, assistantBubble]);
@@ -184,14 +181,14 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
               if (m.id !== assistantId) return m;
               switch (token.type) {
                 case "think":
-                  return { ...m, thinkText: (m.thinkText ?? "") + token.text };
+                  return { ...m, thinking: true };
                 case "response":
                   completedText += token.text;
-                  return { ...m, responseText: m.responseText + token.text };
+                  return { ...m, thinking: true, responseText: m.responseText + token.text };
                 case "done":
-                  return { ...m, citations: token.citations, streaming: false };
+                  return { ...m, citations: token.citations, streaming: false, thinking: false };
                 case "error":
-                  return { ...m, responseText: `[Error: ${token.message}]`, streaming: false };
+                  return { ...m, responseText: `[Error: ${token.message}]`, streaming: false, thinking: false };
                 default:
                   return m;
               }
@@ -242,7 +239,7 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
                       responseText: `Policy created: ${res.data.name}. It is now available in Automation Rules.`,
                       citations: [],
                       streaming: false,
-                      thinkExpanded: false,
+                      thinking: false,
                     },
                   ]);
                 } else {
@@ -281,14 +278,6 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
     }
   };
 
-  const toggleThink = (bubble: ChatBubble) => {
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === bubble.id ? { ...m, thinkExpanded: !m.thinkExpanded } : m
-      )
-    );
-  };
-
   return (
     <div className="flex flex-col h-full bg-[#060A10] border-l border-[#183040] min-w-0 w-full">
       {/* Header */}
@@ -321,7 +310,7 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
         <div className="flex items-center gap-1.5">
           <Brain className="w-3 h-3 text-[#6C8798]" />
           <span className="text-[9px] font-mono text-[#6C8798] uppercase">Think:</span>
-          {(["Auto", "Thinking", "Instruct"] as ThinkMode[]).map((mode) => (
+          {(["Auto", "Thinking"] as ThinkMode[]).map((mode) => (
             <button
               key={mode}
               onClick={() => setThinkMode(mode)}
@@ -382,26 +371,10 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
             key={bubble.id}
             className={`flex flex-col gap-1 ${bubble.role === "user" ? "items-end" : "items-start"}`}
           >
-            {/* Think block (collapsible) */}
-            {bubble.role === "assistant" && bubble.thinkText && (
-              <div className="w-full max-w-[90%]">
-                <button
-                  onClick={() => toggleThink(bubble)}
-                  className="flex items-center gap-1.5 text-[9px] font-mono text-[#4A6878] hover:text-[#6C8798] uppercase tracking-widest transition-colors"
-                >
-                  {bubble.thinkExpanded ? (
-                    <ChevronDown className="w-3 h-3" />
-                  ) : (
-                    <ChevronRight className="w-3 h-3" />
-                  )}
-                  <Brain className="w-3 h-3" />
-                  Reasoning chain
-                </button>
-                {bubble.thinkExpanded && (
-                  <div className="mt-1 p-2.5 bg-[#0B1018] border border-[#1E3040] rounded-[4px] text-[10px] font-mono text-[#4A6878] whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
-                    {bubble.thinkText}
-                  </div>
-                )}
+            {bubble.role === "assistant" && bubble.streaming && bubble.thinking && (
+              <div className="w-full max-w-[90%] flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-widest text-[#4A6878]">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>Thinking...</span>
               </div>
             )}
 

@@ -7,26 +7,13 @@ Provides:
 from __future__ import annotations
 import os
 import torch
-from pathlib import Path
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-def install_root() -> Path:
-    """Resolve the packaged resource root for installed users and repo root for dev."""
-    for env_key in ("MASTERD_RESOURCE_DIR", "MASTERD_INSTALL_ROOT"):
-        value = os.environ.get(env_key)
-        if value:
-            return Path(value).expanduser().resolve()
-    return Path(__file__).resolve().parents[2]
-
-
+# Abstract path resolution through an installation resolution layer
 def resolve_install_path(rel_path: str) -> str:
-    return str((install_root() / rel_path).resolve())
-
-
-def resolve_model_asset(*parts: str) -> Path:
-    model_root = Path(os.environ.get("MASTERD_MODELS_DIR", resolve_install_path("models")))
-    return (model_root.joinpath(*parts)).expanduser().resolve()
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.abspath(os.path.join(root_dir, rel_path))
 
 # Set local Hugging Face cache root to keep the installation self-contained
 if "HF_HOME" not in os.environ:

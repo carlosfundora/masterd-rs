@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { 
-  Upload, FolderPlus, Trash2, RefreshCw, X, Play, FileText, CheckCircle2, 
-  AlertOctagon, Check, MonitorPlay, AlertTriangle, PlayCircle
+  Upload, FolderPlus, Trash2, RefreshCw, X, FileText, CheckCircle2, 
+  AlertOctagon, Check, MonitorPlay, AlertTriangle
 } from "lucide-react";
 import { IntakeItem, WatchFolder } from "../contracts/api";
 import { getBridge } from "../lib/tauri-bridge";
@@ -20,30 +20,36 @@ export default function Intake({
   // Add folder path input
   const [folderPathInput, setFolderPathInput] = useState("");
   const [selectedProfile, setSelectedProfile] = useState("Full Analysis");
-  
-  // Drag over state simulation
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // Drag over state
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Ingest sample document files list
-  const sampleDocuments = [
-    { name: "tax_return_form_1040.pdf", size: "1.4 MB", ext: "pdf" },
-    { name: "stripe_subscription_invoice_may.pdf", size: "340 KB", ext: "pdf" },
-    { name: "walmart_grocery_receipt_paper.png", size: "2.1 MB", ext: "png" },
-    { name: "academic_paper_gpt_attention.txt", size: "48 KB", ext: "txt" }
-  ];
-
-  const handleIngestFile = async (fileName: string) => {
-    const virtualPath = `/Users/username/Desktop/Tax2025/${fileName}`;
-    const bridge = await getBridge();
-    const res = await bridge.intake.addFiles([virtualPath], selectedProfile);
-    if (res.ok) {
-      refreshState();
-    }
+  const handleIngestFiles = async (filePaths: string[]) => {
+   if (filePaths.length === 0) return;
+   const bridge = await getBridge();
+   const res = await bridge.intake.addFiles(filePaths, selectedProfile);
+   if (res.ok) {
+     setStatusMessage(`Queued ${res.data.length} file(s) for ingestion.`);
+     refreshState();
+   } else {
+     setStatusMessage(res.error.message);
+   }
   };
 
+  const extractPaths = (files: FileList | File[]) =>
+   Array.from(files)
+     .map((file) => {
+       const typedFile = file as File & { path?: string };
+       return typedFile.path ?? typedFile.webkitRelativePath ?? "";
+     })
+     .filter((path): path is string => Boolean(path));
+
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
+   e.preventDefault();
+   setIsDragOver(true);
   };
 
   const handleDragLeave = () => {
@@ -53,8 +59,32 @@ export default function Intake({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    const randomSample = sampleDocuments[Math.floor(Math.random() * sampleDocuments.length)];
-    handleIngestFile(randomSample.name);
+    const paths = extractPaths(e.dataTransfer.files);
+    if (paths.length === 0) {
+      setStatusMessage("Dropped files did not expose paths in this runtime.");
+      return;
+    }
+    handleIngestFiles(paths);
+  };
+
+  const handleBrowseFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const paths = extractPaths(e.target.files ?? []);
+    e.target.value = "";
+    if (paths.length === 0) {
+      setStatusMessage("Selected files did not expose paths in this runtime.");
+      return;
+    }
+    handleIngestFiles(paths);
+  };
+
+  const handleBrowseFolder = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const paths = extractPaths(e.target.files ?? []);
+    e.target.value = "";
+    if (paths.length === 0) {
+      setStatusMessage("Selected folder did not expose file paths in this runtime.");
+      return;
+    }
+    handleIngestFiles(paths);
   };
 
   const handleAddWatchFolder = async (e: React.FormEvent) => {
@@ -64,7 +94,10 @@ export default function Intake({
     const res = await bridge.intake.addWatchFolder(folderPathInput.trim(), selectedProfile);
     if (res.ok) {
       setFolderPathInput("");
+      setStatusMessage(`Watch folder added: ${res.data.path}`);
       refreshState();
+    } else {
+      setStatusMessage(res.error.message);
     }
   };
 
@@ -72,6 +105,7 @@ export default function Intake({
     const bridge = await getBridge();
     const res = await bridge.intake.removeWatchFolder(id);
     if (res.ok) {
+      setStatusMessage("Watch folder removed.");
       refreshState();
     }
   };
@@ -80,6 +114,7 @@ export default function Intake({
     const bridge = await getBridge();
     const res = await bridge.intake.retryItem(id);
     if (res.ok) {
+      setStatusMessage("Intake item retried.");
       refreshState();
     }
   };
@@ -88,6 +123,7 @@ export default function Intake({
     const bridge = await getBridge();
     const res = await bridge.intake.cancelItem(id);
     if (res.ok) {
+      setStatusMessage("Intake item cancelled.");
       refreshState();
     }
   };
@@ -118,42 +154,57 @@ export default function Intake({
                   ? "border-[#b91c1c] bg-[#7f1d1d]/5 scale-[0.99]" 
                   : "border-[#27272a] bg-[#09090b]/80 hover:bg-[#18181b]/70 hover:border-[#b91c1c]/70"
               }`}
-              onClick={() => handleIngestFile(sampleDocuments[0].name)}
+              onClick={() => fileInputRef.current?.click()}
             >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleBrowseFiles}
+              />
+              <input
+                ref={folderInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleBrowseFolder}
+                // @ts-expect-error webkitdirectory is supported by desktop webviews
+                webkitdirectory=""
+              />
               <div className="text-center space-y-2">
                   <Upload className={`w-8 h-8 mx-auto transition-transform ${isDragOver ? 'scale-110 text-[#fca5a5] animate-bounce' : 'text-[#71717a]'}`} />
                 <div className="space-y-1">
                   <p className="text-xs font-semibold text-[#E6F7FF]">
-                      Provide document files for ingestion or <span className="text-[#fca5a5] underline">click to select</span>
+                      Drop local document files here, or click to select files and folders
                   </p>
                     <p className="text-[10px] text-[#a1a1aa] max-w-xs mx-auto">
-                      Supports PDF, JPG, PNG, and TXT files. Do not submit corrupted data.
+                      Files and folder contents are passed to the backend ingestion and deduplication pipeline.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Sample files */}
             <div className="bg-[#09090b] border border-[#27272a]/70 p-3.5 rounded-[4px] space-y-3">
-              <div>
-                  <h4 className="text-[10px] uppercase font-mono tracking-wider font-bold text-[#71717a]">Starter samples</h4>
-                  <p className="text-[10px] text-[#a1a1aa] mt-0.5 leading-tight">Use these examples to explore ingestion behavior.</p>
-              </div>
-
-              <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
-                {sampleDocuments.map((s, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleIngestFile(s.name)}
-                    className="w-full text-left p-1.5 bg-[#111113] hover:bg-[#7f1d1d]/5 hover:border-[#b91c1c] border border-[#27272a] rounded-[2px] transition-colors flex items-center gap-2 text-[11px] font-mono"
-                  >
-                    <PlayCircle className="w-3.5 h-3.5 text-[#fca5a5]" />
-                    <div className="truncate flex-1">
-                      <div className="truncate text-[#f4f4f5]">{s.name}</div>
-                      <div className="text-[9px] text-[#71717a]">{s.size}</div>
-                    </div>
-                  </button>
-                ))}
+              <h4 className="text-[10px] uppercase font-mono tracking-wider font-bold text-[#71717a]">Live intake</h4>
+              <p className="text-[10px] text-[#a1a1aa] leading-tight">
+                This panel now sends real local file paths to the backend ingestion command.
+              </p>
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-[10px] font-mono border border-[#27272a] bg-[#05070A] hover:bg-[#101827] px-2.5 py-1.5 rounded-[4px] text-[#f4f4f5]"
+                >
+                  Select files
+                </button>
+                <button
+                  type="button"
+                  onClick={() => folderInputRef.current?.click()}
+                  className="text-[10px] font-mono border border-[#27272a] bg-[#05070A] hover:bg-[#101827] px-2.5 py-1.5 rounded-[4px] text-[#f4f4f5]"
+                >
+                  Select folder
+                </button>
               </div>
             </div>
 
@@ -180,6 +231,11 @@ export default function Intake({
               <Check className="w-3 h-3" /> Local engine ready
             </span>
           </div>
+          {statusMessage && (
+            <div className="text-[10px] font-mono text-[#A7C7D9] bg-[#05070A] border border-[#183040] rounded-[4px] px-3 py-2">
+              {statusMessage}
+            </div>
+          )}
 
         </div>
 

@@ -247,9 +247,8 @@ impl ChatEngine {
         }
     }
 
-    /// Pre-warm both models (call at startup to avoid first-message latency).
+    /// Pre-warm the thinking model (call at startup to avoid first-message latency).
     pub fn preload(&self) -> Result<()> {
-        self.ensure_instruct()?;
         self.ensure_thinking()?;
         Ok(())
     }
@@ -328,40 +327,10 @@ impl ChatEngine {
     fn pick_model(&self, mode: ThinkMode, query: &str) -> ThinkMode {
         match mode {
             ThinkMode::Auto => {
-                let triage = [
-                    "categorize",
-                    "categorise",
-                    "classify",
-                    "rename",
-                    "naming",
-                    "tag",
-                    "duplicate",
-                    "route",
-                    "triage",
-                ];
-                let complex = [
-                    "explain",
-                    "analyze",
-                    "compare",
-                    "why",
-                    "how does",
-                    "summarize",
-                    "describe",
-                    "difference",
-                    "step by step",
-                    "reason",
-                ];
-                let q = query.to_lowercase();
-                if triage.iter().any(|kw| q.contains(kw)) {
-                    ThinkMode::Instruct
-                } else if query.split_whitespace().count() > 12
-                    || complex.iter().any(|kw| q.contains(kw))
-                {
-                    ThinkMode::Thinking
-                } else {
-                    ThinkMode::Instruct
-                }
+                let _ = query;
+                ThinkMode::Thinking
             }
+            ThinkMode::Instruct => ThinkMode::Thinking,
             other => other,
         }
     }
@@ -765,9 +734,9 @@ mod tests {
     }
 
     #[test]
-    fn think_mode_auto_routes_simple_query_to_instruct() {
+    fn think_mode_auto_routes_simple_query_to_thinking() {
         let engine = ChatEngine::new(ChatEngineConfig::default());
         let resolved = engine.pick_model(ThinkMode::Auto, "hello");
-        assert_eq!(resolved, ThinkMode::Instruct);
+        assert_eq!(resolved, ThinkMode::Thinking);
     }
 }

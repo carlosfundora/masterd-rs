@@ -366,7 +366,7 @@ export default function Rules({
           </div>
 
           <p className="text-xs text-[#A7C7D9] shrink-0">
-            Evaluate the rule's absolute authority over the selected document.
+            Evaluate the rule&apos;s absolute authority over the selected document.
           </p>
 
           {/* Live test forms */}

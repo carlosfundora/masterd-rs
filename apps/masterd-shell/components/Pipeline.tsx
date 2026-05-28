@@ -56,73 +56,20 @@ export default function Pipeline({
   return (
     <div id="pipeline-screen" className="space-y-6 text-[#E6F7FF]">
       
-      {/* Top Banner: Local Workers & Health */}
+      {/* Top Banner: Live job summary */}
       <div id="workers-grid-layout" className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        {/* Worker 1 Console Status */}
-        <div className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] space-y-3 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-[#b91c1c]" />
-          <div className="flex justify-between items-center text-xs">
-            <span className="font-mono text-[#6C8798]">THREAD PROCESSOR 01</span>
-            <span className="text-green-400 font-mono flex items-center gap-1.5 font-bold">
-              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse inline-block" /> ONLINE
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-[#7f1d1d]/10 text-[#fca5a5] rounded-[4px]">
-              <Cpu className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#E6F7FF]">local-worker-1</h4>
-              <p className="text-[10px] text-[#A7C7D9] font-mono">TASK: Deduplication Hash queries</p>
-            </div>
-          </div>
-
-          <div className="bg-[#05070A] p-2 border border-[#183040] rounded-[4px] font-mono text-[9px] text-[#6C8798] space-y-1">
-            <div className="truncate">➔ [09:12] loaded thread space hash indices</div>
-            <div className="truncate">➔ [09:14] query SHA matches for doc-104</div>
-          </div>
-        </div>
-
-        {/* Worker 2 Console Status */}
-        <div className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] space-y-3 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-[#7f1d1d]" />
-          <div className="flex justify-between items-center text-xs">
-            <span className="font-mono text-[#6C8798]">THREAD PROCESSOR 02</span>
-            <span className="text-green-400 font-mono flex items-center gap-1.5 font-bold">
-              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse inline-block" /> STANDBY
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-[#7f1d1d]/10 text-[#fca5a5] rounded-[4px]">
-              <Cpu className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-xs font-semibold text-[#E6F7FF]">local-worker-2</h4>
-              <p className="text-[10px] text-[#A7C7D9] font-mono">TASK: OCR Pipeline Re-indexer</p>
-            </div>
-          </div>
-
-          <div className="bg-[#05070A] p-2 border border-[#183040] rounded-[4px] font-mono text-[9px] text-[#6C8798] space-y-1">
-            <div className="truncate">➔ [09:10] idle thread pool sleep state initiated</div>
-            <div className="truncate">➔ [09:12] flush extraction outputs cache storage</div>
-          </div>
-        </div>
-
-        {/* Local worker orchestration info */}
         <div className="bg-[#0B1018] border border-[#183040] p-4 rounded-[4px] flex flex-col justify-between">
           <div>
             <h4 className="text-xs uppercase font-mono tracking-wider font-bold text-[#6C8798] flex items-center gap-1.5">
-              <Workflow className="w-4 h-4 text-[#fca5a5]" /> Local Worker Fleet
+              <Workflow className="w-4 h-4 text-[#fca5a5]" /> Pipeline Summary
             </h4>
             <p className="text-[11px] text-[#A7C7D9] mt-2.5 leading-relaxed">
-              MASTERd runs its worker loops locally through the live desktop backend. No personal data ever exits your system.
+              Live job counts come from the backend pipeline store.
             </p>
           </div>
-          <div className="text-[10px] text-[#fca5a5] font-mono border-t border-[#183040] pt-2 mt-2">
-            Active Core Threads: 2 / Memory Lock: Approved
+          <div className="text-[10px] text-[#fca5a5] font-mono border-t border-[#183040] pt-2 mt-2 space-y-1">
+            <div>Running jobs: {jobs.filter(job => job.status === "running").length}</div>
+            <div>Queued jobs: {jobs.filter(job => job.status === "queued").length}</div>
           </div>
         </div>
 
@@ -264,17 +211,12 @@ export default function Pipeline({
                     <span className="text-[#E6F7FF] break-all">{log.message}</span>
                   </div>
                 ))}
-                {selectedJob.status === "running" && (
-                  <div className="text-[#fca5a5] font-bold animate-pulse text-[11px] mt-2">
-                    █ Worker pipeline process active... awaiting events...
-                  </div>
-                )}
               </div>
             </div>
           ) : (
             <div className="flex-1 flex flex-col justify-center items-center py-10 text-center text-[#6C8798]">
               <Terminal className="w-10 h-10 opacity-30 mb-2 text-[#6C8798]" />
-              <p className="font-mono text-xs">Verify active jobs to trace logs</p>
+              <p className="font-mono text-xs">Select a job to trace live logs</p>
             </div>
           )}
         </div>

@@ -64,6 +64,7 @@ const tauriBridge: MasterdFrontendBridge = {
   system: {
     getStatus: () => invoke("system_get_status"),
     getHealth: () => invoke("system_get_health"),
+    exportBackup: () => invoke("system_export_backup"),
   },
   intake: {
     addFiles: (paths, profileId) => invoke("intake_add_files", { paths, profileId }),
@@ -126,7 +127,7 @@ const tauriBridge: MasterdFrontendBridge = {
 };
 
 // ── Chat bridge (separate from main contract, streamed via Tauri events) ───────
-export type ThinkMode = "Auto" | "Thinking" | "Instruct";
+export type ThinkMode = "Auto" | "Thinking";
 export type SearchMode = "LocalDocuments" | "WebSearch" | "Both";
 
 export type ChatStreamToken =

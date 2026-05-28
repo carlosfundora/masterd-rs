@@ -48,6 +48,11 @@ export type SystemHealth = {
   activeThreads: number;
 };
 
+export type BackupExportResult = {
+  backupPath: string;
+  copiedFiles: number;
+};
+
 export type ModelStatus = {
   id: string;
   name: string;
@@ -427,6 +432,7 @@ export interface MasterdFrontendBridge {
   system: {
     getStatus(): Promise<ApiResult<SystemStatus>>;
     getHealth(): Promise<ApiResult<SystemHealth>>;
+    exportBackup(): Promise<ApiResult<BackupExportResult>>;
   };
 
   intake: {

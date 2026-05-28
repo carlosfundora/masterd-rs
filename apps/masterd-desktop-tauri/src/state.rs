@@ -23,7 +23,7 @@ pub struct AppConfig {
     pub ocr_language: String,
     /// Confidence % below which items go to the review queue (40–99).
     pub safety_confidence_pct: u8,
-    /// Model to use for classification: "instruct" | "thinking" | "auto".
+    /// Model to use for chat: "thinking" | "auto".
     pub chat_model: String,
     /// SearXNG base URL for web search.
     pub searxng_url: String,
@@ -345,6 +345,10 @@ impl AppState {
         // Restore user config
         if let Ok(json) = std::fs::read_to_string(dirs.config_json()) {
             if let Ok(cfg) = serde_json::from_str::<AppConfig>(&json) {
+                let mut cfg = cfg;
+                if !matches!(cfg.chat_model.as_str(), "auto" | "thinking") {
+                    cfg.chat_model = "auto".into();
+                }
                 *self.config.lock().await = cfg;
                 tracing::info!("Restored app config from disk");
             }

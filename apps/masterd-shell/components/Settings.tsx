@@ -36,7 +36,7 @@ export default function Settings({ refreshState }: SettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [isBackupDone, setIsBackupDone] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
 
   useEffect(() => {
     getBridge().then(b => b.settings.get()).then(res => {
@@ -60,9 +60,15 @@ export default function Settings({ refreshState }: SettingsProps) {
     }
   };
 
-  const handleBackup = () => {
-    setIsBackupDone(false);
-    setTimeout(() => setIsBackupDone(true), 1500);
+  const handleBackup = async () => {
+    setBackupMessage(null);
+    const b = await getBridge();
+    const res = await b.system.exportBackup();
+    if (res.ok) {
+      setBackupMessage(`Backup exported to ${res.data.backupPath}`);
+    } else {
+      setBackupMessage(res.error.message);
+    }
   };
 
   const field = "w-full bg-[#09090b] border border-[#27272a] p-2 rounded-[4px] text-xs font-mono text-[#f4f4f5] focus:outline-none focus:border-[#b91c1c]";
@@ -132,9 +138,8 @@ export default function Settings({ refreshState }: SettingsProps) {
               <div className="space-y-1 border-t border-[#183040]/60 pt-3">
                 <label className={label}>Chat Model</label>
                 <select value={cfg.chatModel} onChange={e => set("chatModel", e.target.value)} className={field}>
-                  <option value="auto">Auto (heuristic routing)</option>
-                  <option value="instruct">LFM2.5-350M-Instruct (fast)</option>
                   <option value="thinking">LFM2.5-1.2B-Thinking (deep)</option>
+                  <option value="auto">Auto (routes to thinking)</option>
                 </select>
               </div>
               <div className="space-y-1">
@@ -155,15 +160,15 @@ export default function Settings({ refreshState }: SettingsProps) {
                 <Database className="w-4 h-4 text-green-400" />
                 <h2 className="text-sm font-semibold uppercase tracking-wider">Database Maintenance</h2>
               </div>
-              <p className="text-xs text-[#A7C7D9]">Export full indices or revert index tables to backup points. Done entirely client-side.</p>
+              <p className="text-xs text-[#A7C7D9]">Export the live config and index snapshots to the archive path using the backend.</p>
               <div className="space-y-2">
                 <button type="button" onClick={handleBackup} className="w-full py-2 bg-[#09090b] hover:bg-[#18181b] border border-[#27272a] text-green-400 font-mono text-xs rounded-[4px] inline-flex items-center justify-center gap-1.5">
-                  <RefreshCw className="w-3.5 h-3.5" /> Trigger DB Backup Export
+                  <RefreshCw className="w-3.5 h-3.5" /> Export Live Backup Snapshot
                 </button>
-                {isBackupDone && (
+                {backupMessage && (
                   <div className="p-2.5 bg-green-500/10 border border-green-500/20 rounded-[4px] flex items-center gap-2 text-xs font-mono text-[#E4E4E7]">
                     <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
-                    <span>Backup exported to archive path.</span>
+                    <span>{backupMessage}</span>
                   </div>
                 )}
               </div>
