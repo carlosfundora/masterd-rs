@@ -114,16 +114,12 @@ pub struct RetrievalCandidate {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SearchMode {
     Lexical,
     Semantic,
+    #[default]
     Hybrid,
-}
-
-impl Default for SearchMode {
-    fn default() -> Self {
-        Self::Hybrid
-    }
 }
 
 impl SearchMode {
@@ -947,7 +943,13 @@ impl DataStore {
             params![current_name, classification_json, current_path, now(), id],
         )?;
         drop(conn);
-        self.write_audit(id, "resolved_review", "user", "Document resolved and updated after review", true)?;
+        self.write_audit(
+            id,
+            "resolved_review",
+            "user",
+            "Document resolved and updated after review",
+            true,
+        )?;
         self.get_document(id)
     }
 
@@ -1099,13 +1101,12 @@ impl DataStore {
         let mut merged =
             rrf_merge_candidates(candidates, top_k.saturating_mul(2).max(top_k).max(1));
         let mut reranked = false;
-        if let Some(reranker) = &self.reranker {
-            if let Ok(results) = reranker.rerank(query, &merged, top_k.max(1)) {
-                if !results.is_empty() {
-                    merged = results;
-                    reranked = true;
-                }
-            }
+        if let Some(reranker) = &self.reranker
+            && let Ok(results) = reranker.rerank(query, &merged, top_k.max(1))
+            && !results.is_empty()
+        {
+            merged = results;
+            reranked = true;
         }
         stages.push(RetrievalStageTrace {
             stage: "colbert_rerank".to_string(),
@@ -1391,12 +1392,11 @@ impl DataStore {
     }
 
     fn lexical_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
-        if let Some(meili) = &self.meili {
-            if let Ok(results) = meili.search_chunks(query, limit) {
-                if !results.is_empty() {
-                    return Ok(results);
-                }
-            }
+        if let Some(meili) = &self.meili
+            && let Ok(results) = meili.search_chunks(query, limit)
+            && !results.is_empty()
+        {
+            return Ok(results);
         }
         let conn = self
             .conn
@@ -1409,7 +1409,7 @@ impl DataStore {
                  ORDER BY d.updated_at DESC LIMIT ?1",
             )?;
             let rows = stmt.query_map(params![limit as i64], |row| {
-                Ok(candidate_from_row(row, "lexical")?)
+                candidate_from_row(row, "lexical")
             })?;
             return rows
                 .collect::<std::result::Result<Vec<_>, _>>()
@@ -1427,7 +1427,7 @@ impl DataStore {
              LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
-            Ok(candidate_from_row(row, "lexical")?)
+            candidate_from_row(row, "lexical")
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
@@ -1439,10 +1439,10 @@ impl DataStore {
             .as_ref()
             .and_then(|client| client.embed_one(query).ok());
         let mut out = Vec::new();
-        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref()) {
-            if let Ok(mut results) = lancedb.search(query_vector, limit) {
-                out.append(&mut results);
-            }
+        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref())
+            && let Ok(mut results) = lancedb.search(query_vector, limit)
+        {
+            out.append(&mut results);
         }
         if let Some(mut jina) = self.semantic_search_table(
             "embeddings",
@@ -1628,23 +1628,41 @@ impl DataStore {
             .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let tx = conn.transaction()?;
         let mut lance_records = Vec::new();
-        for (index, chunk) in chunks.iter().enumerate() {
-            let jina_vector = jina_embeddings
-                .as_ref()
-                .and_then(|batch| batch.get(index))
-                .map(|embedding| embedding.vector.clone())
-                .unwrap_or_else(|| hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM));
-            let jina_vector_json = serde_json::to_string(&jina_vector)?;
-            let jina_vector_hash = sha256_hex(jina_vector_json.as_bytes());
-            let jina_profile =
-                build_matryoshka_profile(&jina_provider, chunk, &jina_vector, jina_vector.len());
-            tx.execute(
+        {
+            let mut stmt_main = tx.prepare(
                 "INSERT OR REPLACE INTO embeddings(
                     chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
                     lexical_context, metadata_json, colbert_token_hash, created_at
                  )
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![
+            )?;
+            let mut stmt_m2v = if model2vec_embeddings.is_some() {
+                Some(tx.prepare(
+                    "INSERT OR REPLACE INTO embeddings_model2vec(
+                        chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
+                        lexical_context, metadata_json, colbert_token_hash, created_at
+                     )
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                )?)
+            } else {
+                None
+            };
+
+            for (index, chunk) in chunks.iter().enumerate() {
+                let jina_vector = jina_embeddings
+                    .as_ref()
+                    .and_then(|batch| batch.get(index))
+                    .map(|embedding| embedding.vector.clone())
+                    .unwrap_or_else(|| hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM));
+                let jina_vector_json = serde_json::to_string(&jina_vector)?;
+                let jina_vector_hash = sha256_hex(jina_vector_json.as_bytes());
+                let jina_profile = build_matryoshka_profile(
+                    &jina_provider,
+                    chunk,
+                    &jina_vector,
+                    jina_vector.len(),
+                );
+                stmt_main.execute(params![
                     chunk.id,
                     jina_provider,
                     jina_vector.len() as i64,
@@ -1655,42 +1673,36 @@ impl DataStore {
                     serde_json::to_string(&jina_profile.metadata_context)?,
                     jina_profile.colbert_token_hash,
                     now()
-                ],
-            )?;
-            lance_records.push(LanceVectorRecord {
-                id: chunk.id.clone(),
-                document_id: chunk.document_id.clone(),
-                text: chunk.text.clone(),
-                vector: jina_vector,
-                metadata: jina_profile.metadata_context,
-            });
+                ])?;
+                lance_records.push(LanceVectorRecord {
+                    id: chunk.id.clone(),
+                    document_id: chunk.document_id.clone(),
+                    text: chunk.text.clone(),
+                    vector: jina_vector,
+                    metadata: jina_profile.metadata_context,
+                });
 
-            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref() {
-                if let Some(embedding) = model2vec_embeddings.get(index) {
+                if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref()
+                    && let Some(embedding) = model2vec_embeddings.get(index)
+                    && let Some(stmt_m2v) = stmt_m2v.as_mut()
+                {
                     let vector = embedding.clone();
                     let vector_json = serde_json::to_string(&vector)?;
                     let vector_hash = sha256_hex(vector_json.as_bytes());
                     let profile =
                         build_matryoshka_profile(&model2vec_provider, chunk, &vector, vector.len());
-                    tx.execute(
-                        "INSERT OR REPLACE INTO embeddings_model2vec(
-                            chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
-                            lexical_context, metadata_json, colbert_token_hash, created_at
-                         )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                        params![
-                            chunk.id,
-                            &model2vec_provider,
-                            vector.len() as i64,
-                            vector_json,
-                            vector_hash,
-                            serde_json::to_string(&profile)?,
-                            profile.lexical_context,
-                            serde_json::to_string(&profile.metadata_context)?,
-                            profile.colbert_token_hash,
-                            now()
-                        ],
-                    )?;
+                    stmt_m2v.execute(params![
+                        chunk.id,
+                        &model2vec_provider,
+                        vector.len() as i64,
+                        vector_json,
+                        vector_hash,
+                        serde_json::to_string(&profile)?,
+                        profile.lexical_context,
+                        serde_json::to_string(&profile.metadata_context)?,
+                        profile.colbert_token_hash,
+                        now()
+                    ])?;
                 }
             }
         }
@@ -1775,7 +1787,7 @@ impl DataStore {
                 ",
             )?;
             let rows = stmt.query_map(params![seed, limit as i64], |row| {
-                Ok(candidate_from_row(row, "graph_expansion")?)
+                candidate_from_row(row, "graph_expansion")
             })?;
             out.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
         }
@@ -2095,15 +2107,14 @@ pub fn chunk_text(
 }
 
 fn document_sections(text: &str, extension: &str) -> Vec<(String, String)> {
-    if extension == "rs" {
-        if let Some(sections) = rust_structured_sections(text) {
-            if !sections.is_empty() {
-                return sections
-                    .into_iter()
-                    .map(|section| ("ast_section".to_string(), section))
-                    .collect();
-            }
-        }
+    if extension == "rs"
+        && let Some(sections) = rust_structured_sections(text)
+        && !sections.is_empty()
+    {
+        return sections
+            .into_iter()
+            .map(|section| ("ast_section".to_string(), section))
+            .collect();
     }
     semantic_units(text)
         .into_iter()
@@ -2133,12 +2144,11 @@ fn rust_structured_sections(text: &str) -> Option<Vec<String>> {
                 | "const_item"
                 | "static_item"
                 | "use_declaration"
-        ) {
-            if let Ok(snippet) = child.utf8_text(text.as_bytes()) {
-                let snippet = snippet.trim();
-                if !snippet.is_empty() {
-                    sections.push(snippet.to_string());
-                }
+        ) && let Ok(snippet) = child.utf8_text(text.as_bytes())
+        {
+            let snippet = snippet.trim();
+            if !snippet.is_empty() {
+                sections.push(snippet.to_string());
             }
         }
     }

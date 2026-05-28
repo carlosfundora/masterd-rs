@@ -18,3 +18,10 @@ thiserror.workspace = true
 tracing.workspace = true
 tree-sitter.workspace = true
 tree-sitter-rust.workspace = true
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name = "embeddings_bench"
+harness = false
