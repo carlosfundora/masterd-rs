@@ -134,6 +134,25 @@ if ! "${VENV_PYTHON}" -c "import huggingface_hub" >/dev/null 2>&1; then
   fi
 fi
 
+info "Setting up Rust build acceleration tools (sccache, mold)..."
+if command -v cargo >/dev/null 2>&1; then
+  if ! command -v sccache >/dev/null 2>&1; then
+    info "Installing sccache..."
+    cargo install sccache || warn "Failed to install sccache"
+  fi
+else
+  warn "Cargo not found, skipping sccache installation."
+fi
+
+if ! command -v mold >/dev/null 2>&1; then
+  info "Attempting to install mold..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y mold || warn "Failed to install mold via apt-get. You may need to enter your sudo password."
+  else
+    warn "apt-get not found, please install mold manually."
+  fi
+fi
+
 # Invoke the Python bootstrap script
 info "Executing second stage Python bootstrap..."
 exec "${BOOTSTRAP_VENV}/bin/python" "${ROOT_DIR}/scripts/bootstrap.py"
