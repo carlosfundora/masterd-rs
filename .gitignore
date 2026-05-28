@@ -2,13 +2,10 @@
 *.pdf
 
 # ── Local model weights ──────────────────────────────────────────────────
-# Chat model GGUFs are too large for routine LFS; downloaded by installer.
+# ALL GGUF model weights are downloaded at install time by
+# scripts/download-models.sh — never commit them to git/LFS.
 *.gguf
 models/.hf_cache/
-# ColBERT GGUF is tracked via Git LFS (see .gitattributes).
-!models/lfm2-colbert-350m/*.gguf
-!models/jina-v5-omni-nano-gguf/**/*.gguf
-!models/jina-v5-omni-small-gguf/**/*.gguf
 
 /target/
 apps/masterd-desktop-tauri/target/

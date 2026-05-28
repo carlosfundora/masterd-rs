@@ -1,9 +1,9 @@
 # Mark binary files so git doesn't try to diff them as text.
-# GGUF model weights are stored via Git LFS.
+# GGUF model weights are gitignored — downloaded by scripts/download-models.sh.
 *.sf2   -diff -text
 *.pdf   -diff -text
 *.png   -diff -text
 *.ico   -diff -text
 *.woff  -diff -text
 *.woff2 -diff -text
-*.gguf filter=lfs diff=lfs merge=lfs -text
+
