@@ -35,6 +35,10 @@ impl ChatSession {
         Self::default()
     }
 
+    pub fn messages(&self) -> &[ChatMessage] {
+        &self.messages
+    }
+
     pub fn push(&mut self, role: Role, content: String) {
         self.messages.push(ChatMessage { role, content });
     }
@@ -71,6 +75,20 @@ impl ChatSession {
             out.push_str("<|im_end|>\n");
         }
 
+        // Prime the model to generate the next assistant turn.
+        out.push_str("<|im_start|>assistant\n");
+        out
+    }
+
+    pub fn to_chatml_suffix(&self) -> String {
+        let mut out = String::new();
+        for msg in &self.messages {
+            out.push_str("<|im_start|>");
+            out.push_str(msg.role.as_str());
+            out.push('\n');
+            out.push_str(&msg.content);
+            out.push_str("<|im_end|>\n");
+        }
         // Prime the model to generate the next assistant turn.
         out.push_str("<|im_start|>assistant\n");
         out

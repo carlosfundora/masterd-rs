@@ -105,7 +105,7 @@ impl OllamaBackend {
         max_tokens: usize,
         citations: Vec<WebResult>,
         tx: mpsc::Sender<ChatToken>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let model = self
             .resolve_model()
             .await
@@ -171,6 +171,6 @@ impl OllamaBackend {
                 citations,
             })
             .await;
-        Ok(())
+        Ok(text)
     }
 }

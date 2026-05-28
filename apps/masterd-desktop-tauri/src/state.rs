@@ -246,6 +246,12 @@ impl AppDirs {
     pub fn config_json(&self) -> PathBuf {
         self.config.join("app-config.json")
     }
+    pub fn learned_classifications_json(&self) -> PathBuf {
+        self.config.join("learned_classifications.json")
+    }
+    pub fn learned_preferences_json(&self) -> PathBuf {
+        self.config.join("learned_preferences.json")
+    }
     pub fn event_log_jsonl(&self) -> PathBuf {
         self.logs.join("masterd-events.jsonl")
     }
@@ -296,6 +302,8 @@ pub struct AppState {
     pub dirs: std::sync::Mutex<Option<Arc<AppDirs>>>,
     /// Canonical SQLite-backed document/retrieval/preference store.
     pub data_store: std::sync::Mutex<Option<DataStore>>,
+    pub classification_learner: Arc<Mutex<masterd_core::nlp::classification_learner::ClassificationLearner>>,
+    pub preference_learner: Arc<Mutex<masterd_core::nlp::preference_learner::PreferenceLearner>>,
 }
 
 impl Clone for AppState {
@@ -310,6 +318,8 @@ impl Clone for AppState {
             config: self.config.clone(),
             dirs: std::sync::Mutex::new(dirs),
             data_store: std::sync::Mutex::new(data_store),
+            classification_learner: self.classification_learner.clone(),
+            preference_learner: self.preference_learner.clone(),
         }
     }
 }
@@ -325,6 +335,8 @@ impl AppState {
             config: Arc::new(Mutex::new(AppConfig::default())),
             dirs: std::sync::Mutex::new(None),
             data_store: std::sync::Mutex::new(None),
+            classification_learner: Arc::new(Mutex::new(masterd_core::nlp::classification_learner::ClassificationLearner::default())),
+            preference_learner: Arc::new(Mutex::new(masterd_core::nlp::preference_learner::PreferenceLearner::default())),
         }
     }
 
@@ -348,6 +360,21 @@ impl AppState {
             if let Ok(items) = serde_json::from_str::<Vec<IntakeQueueItem>>(&json) {
                 *self.intake_queue.lock().await = items;
                 tracing::info!("Restored intake queue from disk");
+            }
+        }
+
+        // Restore classifications
+        if let Ok(json) = std::fs::read_to_string(dirs.learned_classifications_json()) {
+            if let Ok(learner) = serde_json::from_str(&json) {
+                *self.classification_learner.lock().await = learner;
+                tracing::info!("Restored learned classifications from disk");
+            }
+        }
+        // Restore preferences
+        if let Ok(json) = std::fs::read_to_string(dirs.learned_preferences_json()) {
+            if let Ok(learner) = serde_json::from_str(&json) {
+                *self.preference_learner.lock().await = learner;
+                tracing::info!("Restored learned preferences from disk");
             }
         }
 
@@ -425,6 +452,22 @@ impl AppState {
         if let Ok(json) = serde_json::to_string_pretty(&intake_queue) {
             if let Err(e) = write_atomic(&dirs.intake_queue_json(), json.as_bytes()) {
                 tracing::error!("Failed to save intake queue: {e}");
+            }
+        }
+
+        // Save classifications
+        let class_learner = self.classification_learner.lock().await.clone();
+        if let Ok(json) = serde_json::to_string_pretty(&class_learner) {
+            if let Err(e) = write_atomic(&dirs.learned_classifications_json(), json.as_bytes()) {
+                tracing::error!("Failed to save learned classifications: {e}");
+            }
+        }
+
+        // Save preferences
+        let pref_learner = self.preference_learner.lock().await.clone();
+        if let Ok(json) = serde_json::to_string_pretty(&pref_learner) {
+            if let Err(e) = write_atomic(&dirs.learned_preferences_json(), json.as_bytes()) {
+                tracing::error!("Failed to save learned preferences: {e}");
             }
         }
 

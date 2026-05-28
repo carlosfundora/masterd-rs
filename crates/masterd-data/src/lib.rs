@@ -922,6 +922,35 @@ impl DataStore {
         self.get_document(id)
     }
 
+    pub fn update_document_after_review(
+        &self,
+        id: &str,
+        current_name: &str,
+        category: &str,
+        current_path: &str,
+    ) -> Result<Option<DocumentRecord>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let classification_json = serde_json::to_string(&serde_json::json!({
+            "category": category,
+            "confidence": 1.0
+        }))?;
+        conn.execute(
+            "UPDATE documents 
+             SET current_name = ?1, 
+                 classification_json = ?2, 
+                 current_path = ?3,
+                 updated_at = ?4 
+             WHERE id = ?5",
+            params![current_name, classification_json, current_path, now(), id],
+        )?;
+        drop(conn);
+        self.write_audit(id, "resolved_review", "user", "Document resolved and updated after review", true)?;
+        self.get_document(id)
+    }
+
     pub fn find_document_by_hash(&self, hash: &str) -> Result<Option<DocumentRecord>> {
         let conn = self
             .conn

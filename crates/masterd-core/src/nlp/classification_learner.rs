@@ -1,16 +1,18 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use tracing::{info, warn, error};
 use super::persona::MasterdPersona;
+
+fn default_regex() -> Regex {
+    Regex::new(r"\b\w{4,}\b").unwrap()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClassificationLearner {
     pub keyword_mappings: HashMap<String, HashMap<String, f32>>,
     pub filename_patterns: HashMap<String, String>,
     pub correction_count: usize,
-    #[serde(skip)]
+    #[serde(skip, default = "default_regex")]
     fallback_keyword_regex: Regex,
 }
 
@@ -20,7 +22,7 @@ impl Default for ClassificationLearner {
             keyword_mappings: HashMap::new(),
             filename_patterns: HashMap::new(),
             correction_count: 0,
-            fallback_keyword_regex: Regex::new(r"\b\w{4,}\b").unwrap(),
+            fallback_keyword_regex: default_regex(),
         }
     }
 }

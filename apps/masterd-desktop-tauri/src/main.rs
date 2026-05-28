@@ -1389,12 +1389,160 @@ async fn review_resolve(
     id: String,
     resolution: serde_json::Value,
 ) -> Result<ApiResult<ReviewItem>, String> {
+    let approved = resolution
+        .get("approved")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
     if let Some(store) = data_store(&state) {
         let lookup_id = id.clone();
-        let approved = resolution
-            .get("approved")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+        
+        // 1. Fetch the original ReviewItem
+        let review_item = run_blocking({
+            let store = store.clone();
+            let lookup_id = lookup_id.clone();
+            move || {
+                store.list_review_items(100, 0)
+                    .map(|items| items.into_iter().find(|i| i.id == lookup_id))
+                    .map_err(|err| err.to_string())
+            }
+        })
+        .await?;
+
+        if let Some(ref rev) = review_item {
+            let doc_id = rev.document_id.clone();
+            // Fetch original document
+            let doc_opt = run_blocking({
+                let store = store.clone();
+                let doc_id = doc_id.clone();
+                move || store.get_document(&doc_id).map_err(|err| err.to_string())
+            })
+            .await?;
+
+            if let Some(doc) = doc_opt {
+                let original_category = doc.classification.as_ref()
+                    .map(|c| c.category.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let original_name = doc.current_name.clone();
+                let original_path = doc.current_path.clone();
+
+                // Extract user corrections
+                let corrected_name = resolution
+                    .get("correctedName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&original_name)
+                    .to_string();
+
+                let corrected_category = resolution
+                    .get("correctedCategory")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&original_category)
+                    .to_string();
+
+                let corrected_folder = resolution
+                    .get("correctedFolder")
+                    .and_then(|v| v.as_str());
+
+                let document_text = doc.extracted_text.clone();
+
+                // 2. Trigger learning if learning is enabled in AppConfig
+                let config = state.config.lock().await.clone();
+
+                if approved {
+                    // Trigger Classification learning
+                    if config.classification_learning_enabled && corrected_category != original_category {
+                        let mut learner = state.classification_learner.lock().await;
+                        learner.learn_from_correction(
+                            &original_category,
+                            &corrected_category,
+                            document_text.as_deref(),
+                            Some(&original_name),
+                        );
+                    }
+
+                    // Trigger Preference learning
+                    if config.preference_learning_enabled && (corrected_name != original_name || corrected_folder.is_some()) {
+                        let mut learner = state.preference_learner.lock().await;
+                        
+                        let orig_folder = std::path::Path::new(&original_path)
+                            .parent()
+                            .map(|p| p.to_string_lossy().to_string());
+                        
+                        let mut context = std::collections::HashMap::new();
+                        context.insert("doc_type".to_string(), corrected_category.clone());
+                        if let Some(ref text) = document_text {
+                            context.insert("text".to_string(), text.clone());
+                        }
+
+                        learner.learn_from_correction(
+                            &original_name,
+                            &corrected_name,
+                            orig_folder.as_deref(),
+                            corrected_folder,
+                            document_text.as_deref(),
+                            Some(&context),
+                        );
+                    }
+
+                    // Persist state to save learners
+                    state.persist().await;
+                }
+
+                // 3. Rename/Move physical file on disk if filename or path changed
+                let mut final_path = original_path.clone();
+                if approved {
+                    if let Some(dest_dir) = corrected_folder {
+                        let dest_path = std::path::Path::new(dest_dir).join(&corrected_name);
+                        if let Some(parent) = dest_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        if std::path::Path::new(&original_path).exists() {
+                            if let Err(e) = std::fs::rename(&original_path, &dest_path) {
+                                tracing::error!("Failed to move file from {} to {}: {}", original_path, dest_path.display(), e);
+                            } else {
+                                final_path = dest_path.to_string_lossy().to_string();
+                            }
+                        }
+                    } else if corrected_name != original_name {
+                        let orig_p = std::path::Path::new(&original_path);
+                        if let Some(parent) = orig_p.parent() {
+                            let dest_path = parent.join(&corrected_name);
+                            if orig_p.exists() {
+                                if let Err(e) = std::fs::rename(&original_path, &dest_path) {
+                                    tracing::error!("Failed to rename file from {} to {}: {}", original_path, dest_path.display(), e);
+                                } else {
+                                    final_path = dest_path.to_string_lossy().to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 4. Update the database document
+                if approved {
+                    let store_clone = store.clone();
+                    let doc_id_clone = doc.id.clone();
+                    let corrected_name_clone = corrected_name.clone();
+                    let corrected_category_clone = corrected_category.clone();
+                    let final_path_clone = final_path.clone();
+                    
+                    let _ = run_blocking(move || {
+                        store_clone.update_document_after_review(
+                            &doc_id_clone,
+                            &corrected_name_clone,
+                            &corrected_category_clone,
+                            &final_path_clone,
+                        )
+                        .map_err(|err| err.to_string())
+                    })
+                    .await?;
+                }
+            }
+        }
+
+        // 5. Finally resolve the review item
+        let lookup_id = id.clone();
         if let Some(item) = run_blocking(move || {
             store
                 .resolve_review(&lookup_id, approved)
@@ -1405,6 +1553,7 @@ async fn review_resolve(
             return Ok(ok(map_review(item)));
         }
     }
+    
     Ok(ok(ReviewItem {
         id,
         document_id: String::new(),

@@ -179,10 +179,18 @@ impl AttentionLayer {
         let y = y.transpose(1, 2)?.reshape(&[b_sz, seq_len, n_embd])?;
         self.wo.forward(&y)
     }
+
+    pub fn get_cache(&self) -> Option<(Tensor, Tensor)> {
+        self.kv_cache.clone()
+    }
+
+    pub fn set_cache(&mut self, cache: Option<(Tensor, Tensor)>) {
+        self.kv_cache = cache;
+    }
 }
 
 impl ShortConvLayer {
-    fn forward(&mut self, xs: &Tensor, _index_pos: usize) -> Result<Tensor> {
+    fn forward(&mut self, xs: &Tensor, index_pos: usize) -> Result<Tensor> {
         let (b_sz, seq_len, hidden) = xs.dims3()?;
         let bcx = self.in_proj.forward(xs)?.transpose(1, 2)?;
         let b = bcx.narrow(1, 0, hidden)?;
@@ -218,6 +226,14 @@ impl ShortConvLayer {
                 .sum_keepdim(2)?
                 .contiguous()?
         } else {
+            let (bx_input, pad_len) = match &self.cache {
+                Some(state) if index_pos > 0 => {
+                    let cat = Tensor::cat(&[state, &bx], 2)?;
+                    (cat, state.dim(2)?)
+                }
+                _ => (bx, 0),
+            };
+
             let conv = Conv1d::new(
                 conv_weight
                     .reshape((hidden, 1, self.l_cache))?
@@ -229,13 +245,13 @@ impl ShortConvLayer {
                     ..Default::default()
                 },
             );
-            let mut out = conv.forward(&bx.contiguous()?)?;
-            out = out.narrow(2, 0, seq_len)?;
+            let mut out = conv.forward(&bx_input.contiguous()?)?;
+            out = out.narrow(2, pad_len, seq_len)?;
 
             if self.l_cache > 0 {
-                let (_, _, cur_len) = bx.dims3()?;
+                let (_, _, cur_len) = bx_input.dims3()?;
                 let start = cur_len.saturating_sub(self.l_cache);
-                let mut cache_src = bx.narrow(2, start, cur_len - start)?;
+                let mut cache_src = bx_input.narrow(2, start, cur_len - start)?;
                 if cache_src.dims3()?.2 < self.l_cache {
                     let pad = self.l_cache - cache_src.dims3()?.2;
                     let zeros =
@@ -251,6 +267,14 @@ impl ShortConvLayer {
         conv_out = (c * &conv_out)?;
         let conv_out = conv_out.transpose(1, 2)?.contiguous()?;
         self.out_proj.forward(&conv_out)
+    }
+
+    pub fn get_cache(&self) -> Option<Tensor> {
+        self.cache.clone()
+    }
+
+    pub fn set_cache(&mut self, cache: Option<Tensor>) {
+        self.cache = cache;
     }
 }
 
@@ -627,4 +651,55 @@ impl ModelWeights {
         let _enter = self.span_output.enter();
         self.output.forward(&hidden)
     }
+
+    pub fn get_cache(&self) -> ModelCache {
+        let mut attention_caches = Vec::with_capacity(self.layers.len());
+        let mut conv_caches = Vec::with_capacity(self.layers.len());
+        for layer in &self.layers {
+            let (attn, conv) = layer.get_cache();
+            attention_caches.push(attn);
+            conv_caches.push(conv);
+        }
+        ModelCache {
+            attention_caches,
+            conv_caches,
+        }
+    }
+
+    pub fn set_cache(&mut self, cache: &ModelCache) {
+        for (i, layer) in self.layers.iter_mut().enumerate() {
+            let attn = cache.attention_caches.get(i).cloned().flatten();
+            let conv = cache.conv_caches.get(i).cloned().flatten();
+            layer.set_cache(attn, conv);
+        }
+    }
+
+    pub fn clear_cache(&mut self) {
+        for layer in self.layers.iter_mut() {
+            layer.set_cache(None, None);
+        }
+    }
 }
+
+#[derive(Clone)]
+pub struct ModelCache {
+    pub attention_caches: Vec<Option<(Tensor, Tensor)>>,
+    pub conv_caches: Vec<Option<Tensor>>,
+}
+
+impl LayerWeights {
+    pub fn get_cache(&self) -> (Option<(Tensor, Tensor)>, Option<Tensor>) {
+        match &self.kind {
+            LayerKind::Attention(attn) => (attn.get_cache(), None),
+            LayerKind::ShortConv(conv) => (None, conv.get_cache()),
+        }
+    }
+
+    pub fn set_cache(&mut self, attn_cache: Option<(Tensor, Tensor)>, conv_cache: Option<Tensor>) {
+        match &mut self.kind {
+            LayerKind::Attention(attn) => attn.set_cache(attn_cache),
+            LayerKind::ShortConv(conv) => conv.set_cache(conv_cache),
+        }
+    }
+}
+

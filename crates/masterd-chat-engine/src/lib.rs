@@ -101,6 +101,9 @@ struct LoadedModel {
     tokenizer: Tokenizer,
     eos_token_id: u32,
     device: Device,
+    persona_cache: Option<candle_transformers::models::quantized_lfm2::ModelCache>,
+    persona_token_count: usize,
+    persona_tokens: Vec<u32>,
 }
 
 impl LoadedModel {
@@ -133,7 +136,7 @@ impl LoadedModel {
         let mut cursor = Cursor::new(gguf_bytes);
         let content = gguf_file::Content::read(&mut cursor)
             .with_context(|| format!("parse embedded gguf for {label}"))?;
-        let weights = ModelWeights::from_gguf(content, &mut cursor, &device)
+        let mut weights = ModelWeights::from_gguf(content, &mut cursor, &device)
             .with_context(|| format!("build model weights for {label}"))?;
 
         // Tokenizer from raw JSON bytes — no file path needed.
@@ -151,11 +154,30 @@ impl LoadedModel {
         let eos_token_id = Self::guess_eos(&tokenizer);
         info!("'{label}' ready — eos_token_id={eos_token_id}");
 
+        // Pre-evaluate the MASTERD_PERSONA prefix
+        let persona_prompt = format!("<|im_start|>system\n{}\n<|im_end|>\n", MASTERD_PERSONA);
+        let persona_tokens = tokenizer
+            .encode(persona_prompt.as_str(), true)
+            .map_err(|e| anyhow::anyhow!("encode persona prompt for {label}: {e}"))?
+            .get_ids()
+            .to_vec();
+        let persona_token_count = persona_tokens.len();
+
+        info!("pre-evaluating MASTERd persona prefix for {label} ({} tokens)...", persona_token_count);
+        let prefix_input = candle_core::Tensor::new(persona_tokens.as_slice(), &device)?.unsqueeze(0)?;
+        let _prefix_logits = weights.forward(&prefix_input, 0)?;
+        let persona_cache = Some(weights.get_cache());
+        weights.clear_cache();
+        info!("MASTERd persona KV cache successfully locked for {label}.");
+
         Ok(Self {
             weights,
             tokenizer,
             eos_token_id,
             device,
+            persona_cache,
+            persona_token_count,
+            persona_tokens,
         })
     }
 
@@ -377,14 +399,27 @@ impl ChatEngine {
         let system_prompt_fb = system_prompt.clone();
         let query_fb = query.clone();
 
+        // Construct suffix prompt for prefix cache support
+        let mut suffix_session = ChatSession::new();
+        if !context_block.is_empty() {
+            suffix_session.push(Role::System, context_block.clone());
+        }
+        for msg in session.messages() {
+            suffix_session.push(msg.role, msg.content.clone());
+        }
+        let suffix_prompt = suffix_session.to_chatml_suffix();
+        let full_prompt = prompt.clone();
+
         // ── Attempt 1: embedded GGUF model ──────────────────────────────────
         let embedded_result = tokio::task::spawn_blocking(move || match resolved {
             ThinkMode::Thinking => {
                 engine.ensure_thinking()?;
                 let mut g = engine.thinking.lock().unwrap();
+                let use_cache = g.as_ref().unwrap().persona_cache.is_some();
                 generate(
                     g.as_mut().unwrap(),
-                    &prompt,
+                    if use_cache { "" } else { &full_prompt },
+                    if use_cache { Some(&suffix_prompt) } else { None },
                     &cfg,
                     ThinkMode::Thinking,
                     tx2,
@@ -394,9 +429,11 @@ impl ChatEngine {
             _ => {
                 engine.ensure_instruct()?;
                 let mut g = engine.instruct.lock().unwrap();
+                let use_cache = g.as_ref().unwrap().persona_cache.is_some();
                 generate(
                     g.as_mut().unwrap(),
-                    &prompt,
+                    if use_cache { "" } else { &full_prompt },
+                    if use_cache { Some(&suffix_prompt) } else { None },
                     &cfg,
                     ThinkMode::Instruct,
                     tx2,
@@ -408,7 +445,10 @@ impl ChatEngine {
         .context("generation thread panicked");
 
         match embedded_result {
-            Ok(Ok(())) => return Ok(()),
+            Ok(Ok(assistant_response)) => {
+                session.push(Role::Assistant, assistant_response);
+                return Ok(());
+            }
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "embedded model failed — trying Ollama fallback");
             }
@@ -431,7 +471,7 @@ impl ChatEngine {
             );
         }
 
-        ollama
+        let assistant_response = ollama
             .chat_stream(
                 &system_prompt_fb,
                 &query_fb,
@@ -439,7 +479,9 @@ impl ChatEngine {
                 citations_fb,
                 tx,
             )
-            .await
+            .await?;
+        session.push(Role::Assistant, assistant_response);
+        Ok(())
     }
 
     /// Generate a short non-streaming JSON/text draft with the embedded
@@ -472,19 +514,35 @@ impl ChatEngine {
 fn generate(
     model: &mut LoadedModel,
     prompt: &str,
+    suffix_prompt: Option<&str>,
     config: &ChatEngineConfig,
     mode: ThinkMode,
     tx: mpsc::Sender<ChatToken>,
     citations: Vec<WebResult>,
-) -> Result<()> {
-    let ids: Vec<u32> = model
-        .tokenizer
-        .encode(prompt, true)
-        .map_err(|e| anyhow::anyhow!("encode: {e}"))?
-        .get_ids()
-        .to_vec();
+) -> Result<String> {
+    let (all_tokens, start_pos, input_ids) = if let (Some(suffix), Some(cache)) = (suffix_prompt, &model.persona_cache) {
+        model.weights.set_cache(cache);
+        let suffix_ids: Vec<u32> = model
+            .tokenizer
+            .encode(suffix, true)
+            .map_err(|e| anyhow::anyhow!("encode suffix: {e}"))?
+            .get_ids()
+            .to_vec();
+        let mut tokens = model.persona_tokens.clone();
+        tokens.extend_from_slice(&suffix_ids);
+        (tokens, model.persona_token_count, suffix_ids)
+    } else {
+        model.weights.clear_cache();
+        let ids: Vec<u32> = model
+            .tokenizer
+            .encode(prompt, true)
+            .map_err(|e| anyhow::anyhow!("encode: {e}"))?
+            .get_ids()
+            .to_vec();
+        (ids.clone(), 0, ids)
+    };
 
-    let input = candle_core::Tensor::new(ids.as_slice(), &model.device)?.unsqueeze(0)?;
+    let input = candle_core::Tensor::new(input_ids.as_slice(), &model.device)?.unsqueeze(0)?;
     let mut logits_proc = LogitsProcessor::from_sampling(
         42,
         Sampling::TopK {
@@ -493,12 +551,13 @@ fn generate(
         },
     );
 
-    let mut all_tokens = ids.clone();
+    let mut all_tokens = all_tokens;
     let mut in_think = false;
     let mut think_buf = String::new();
+    let mut response_accumulator = String::new();
 
-    // Process full prompt in one forward pass.
-    let logits = model.weights.forward(&input, 0)?;
+    // Process first pass.
+    let logits = model.weights.forward(&input, start_pos)?;
     let logits = logits.squeeze(0)?.squeeze(0)?;
     let logits = repeat_penalty(
         &logits,
@@ -526,6 +585,7 @@ fn generate(
         all_tokens.push(next);
 
         if let Some(text) = decode_one(&model.tokenizer, next) {
+            response_accumulator.push_str(&text);
             if mode == ThinkMode::Thinking {
                 think_buf.push_str(&text);
                 if !in_think && think_buf.contains("<think>") {
@@ -554,7 +614,7 @@ fn generate(
         model: badge.to_string(),
         citations,
     });
-    Ok(())
+    Ok(response_accumulator)
 }
 
 fn generate_text(
@@ -652,7 +712,7 @@ mod tests {
     #[test]
     fn persona_is_embedded_and_non_empty() {
         assert!(!MASTERD_PERSONA.is_empty());
-        assert!(MASTERD_PERSONA.contains("[IDENTITY]"));
+        assert!(MASTERD_PERSONA.contains("[MASTERD IDENTITY]"));
     }
 
     #[test]
