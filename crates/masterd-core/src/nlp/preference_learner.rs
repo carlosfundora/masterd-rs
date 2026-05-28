@@ -581,3 +581,93 @@ impl PreferenceLearner {
         self.correction_count = 0;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_suggest_folder_entity_match() {
+        let mut learner = PreferenceLearner::new();
+        learner.entity_associations.insert(
+            "Apple".to_string(),
+            EntityMeta {
+                entity_type: "Company".to_string(),
+                folder: Some("Invoices/Apple".to_string()),
+                confidence: 0.9,
+                preferred_casing: Some("Apple".to_string()),
+            },
+        );
+
+        // Exact match in content
+        let (folder, conf) = learner.suggest_folder("Invoice from Apple Inc.", "doc.pdf");
+        assert_eq!(folder, "Invoices/Apple");
+        assert_eq!(conf, 0.9);
+
+        // Case insensitive match in filename
+        let (folder, conf) = learner.suggest_folder("Some receipt", "apple_receipt.pdf");
+        assert_eq!(folder, "Invoices/Apple");
+        assert_eq!(conf, 0.9);
+    }
+
+    #[test]
+    fn test_suggest_folder_keyword_match() {
+        let mut learner = PreferenceLearner::new();
+        learner.folder_mappings.insert("tax".to_string(), "Finance/Taxes".to_string());
+        learner.folder_mappings.insert("receipt".to_string(), "Finance/Receipts".to_string());
+
+        // Match keyword in content
+        let (folder, conf) = learner.suggest_folder("This is a tax document", "doc.pdf");
+        assert_eq!(folder, "Finance/Taxes");
+        assert_eq!(conf, 0.6);
+
+        // Match keyword in filename
+        let (folder, conf) = learner.suggest_folder("grocery", "grocery_receipt_2023.pdf");
+        assert_eq!(folder, "Finance/Receipts");
+        assert_eq!(conf, 0.6);
+    }
+
+    #[test]
+    fn test_suggest_folder_no_match() {
+        let mut learner = PreferenceLearner::new();
+        learner.entity_associations.insert(
+            "Apple".to_string(),
+            EntityMeta {
+                entity_type: "Company".to_string(),
+                folder: Some("Invoices/Apple".to_string()),
+                confidence: 0.9,
+                preferred_casing: Some("Apple".to_string()),
+            },
+        );
+        learner.folder_mappings.insert("tax".to_string(), "Finance/Taxes".to_string());
+
+        let (folder, conf) = learner.suggest_folder("Random document", "doc.pdf");
+        assert_eq!(folder, "");
+        assert_eq!(conf, 0.0);
+    }
+
+    #[test]
+    fn test_suggest_folder_entity_match_without_folder() {
+        let mut learner = PreferenceLearner::new();
+        learner.entity_associations.insert(
+            "Apple".to_string(),
+            EntityMeta {
+                entity_type: "Company".to_string(),
+                folder: None,
+                confidence: 0.9,
+                preferred_casing: Some("Apple".to_string()),
+            },
+        );
+        learner.folder_mappings.insert("tax".to_string(), "Finance/Taxes".to_string());
+
+        // Match entity but it has no folder, fallback to keyword if any, else none
+        let (folder, conf) = learner.suggest_folder("Invoice from Apple Inc.", "doc.pdf");
+        assert_eq!(folder, "");
+        assert_eq!(conf, 0.0);
+
+        // Match entity with no folder, fallback to keyword match
+        let (folder, conf) = learner.suggest_folder("Apple tax document", "doc.pdf");
+        assert_eq!(folder, "Finance/Taxes");
+        assert_eq!(conf, 0.6);
+    }
+}
