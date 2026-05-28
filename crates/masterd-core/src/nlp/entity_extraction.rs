@@ -86,13 +86,11 @@ pub fn extract_entities(text: &str) -> ExtractedEntities {
     if let Some(mat) = DATE_PATTERN_1.find(text_to_process)
         .or_else(|| DATE_PATTERN_2.find(text_to_process))
         .or_else(|| DATE_PATTERN_3.find(text_to_process))
-    {
-        if let Some(parsed) = parse_date(mat.as_str()) {
+        && let Some(parsed) = parse_date(mat.as_str()) {
             extracted.date = Some(parsed);
             extracted.year = Some(parsed.year());
             extracted.metadata.insert("year_month".to_string(), parsed.format("%Y-%m").to_string());
         }
-    }
 
     // 1. Account Last 4
     if let Some(mat) = ACCOUNT_LAST4_PATTERN.find(text_to_process) {
@@ -105,13 +103,11 @@ pub fn extract_entities(text: &str) -> ExtractedEntities {
     }
 
     // 3. Year Extraction (fallback if no date extracted)
-    if extracted.year.is_none() {
-        if let Some(mat) = YEAR_PATTERN.find(text_to_process) {
-            if let Ok(year) = mat.as_str().parse::<i32>() {
+    if extracted.year.is_none()
+        && let Some(mat) = YEAR_PATTERN.find(text_to_process)
+            && let Ok(year) = mat.as_str().parse::<i32>() {
                 extracted.year = Some(year);
             }
-        }
-    }
 
     // 4. Money Amounts
     for mat in MONEY_PATTERN.find_iter(text_to_process).take(5) {
@@ -127,12 +123,11 @@ pub fn extract_entities(text: &str) -> ExtractedEntities {
     if doc_type == "1099" {
         if let Some(caps) = PAYER_PATTERN.captures(text_to_process) {
             let payer = caps.get(1).or(caps.get(2)).map(|m| m.as_str().trim().to_string());
-            if let Some(p) = payer {
-                if p.len() > 2 {
+            if let Some(p) = payer
+                && p.len() > 2 {
                     extracted.sender = Some(p.clone());
                     extracted.metadata.insert("payer".to_string(), p);
                 }
-            }
         }
     } else if doc_type == "W-2" {
         if let Some(mat) = EIN_PATTERN.find(text_to_process) {
@@ -145,16 +140,14 @@ pub fn extract_entities(text: &str) -> ExtractedEntities {
     }
 
     // Sender regex fallback
-    if extracted.sender.is_none() {
-        if let Some(caps) = SENDER_PATTERN.captures(text_to_process) {
-            if let Some(m) = caps.get(1) {
+    if extracted.sender.is_none()
+        && let Some(caps) = SENDER_PATTERN.captures(text_to_process)
+            && let Some(m) = caps.get(1) {
                 let s = m.as_str().trim().to_string();
                 if s.len() > 2 {
                     extracted.sender = Some(s);
                 }
             }
-        }
-    }
 
     extracted
 }
