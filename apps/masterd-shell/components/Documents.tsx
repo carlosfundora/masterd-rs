@@ -13,6 +13,20 @@ type DocumentsProps = {
   refreshState: () => void;
 };
 
+type InspectorTab = "overview" | "preview" | "text" | "classify" | "rename" | "dupes" | "audit" | "raw";
+
+const INSPECTOR_TABS: { id: InspectorTab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "preview", label: "Preview" },
+  { id: "text", label: "OCR Text" },
+  { id: "classify", label: "Classify" },
+  { id: "rename", label: "Rename" },
+  { id: "dupes", label: "Dupes" },
+  { id: "audit", label: "Audit" },
+  { id: "raw", label: "Raw JSON" }
+];
+
+
 export default function Documents({
   bridge,
   documents,
@@ -27,7 +41,7 @@ export default function Documents({
   const [dupeFilter, setDupeFilter] = useState("");
   
   // Inspector Tabs
-  const [inspectorTab, setInspectorTab] = useState<"overview" | "preview" | "text" | "classify" | "rename" | "dupes" | "audit" | "raw">("overview");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("overview");
 
   // Extracted entities and text preview state
   const [entities, setEntities] = useState<Array<{text: string, label: string, confidence: number}>>([]);
@@ -409,19 +423,10 @@ export default function Documents({
 
           {/* Inspector navigation tabs */}
           <div className="flex border-b border-[#183040] gap-1 font-mono text-[10px] bg-[#05070A]/30 p-1 rounded-[4px] overflow-x-auto shrink-0">
-            {[
-              { id: "overview", label: "Overview" },
-              { id: "preview", label: "Preview" },
-              { id: "text", label: "OCR Text" },
-              { id: "classify", label: "Classify" },
-              { id: "rename", label: "Rename" },
-              { id: "dupes", label: "Dupes" },
-              { id: "audit", label: "Audit" },
-              { id: "raw", label: "Raw JSON" }
-            ].map(tab => (
+            {INSPECTOR_TABS.map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setInspectorTab(tab.id as any)}
+                onClick={() => setInspectorTab(tab.id)}
                 className={`px-2 py-1 rounded-[2px] cursor-pointer whitespace-nowrap transition-colors ${
                   inspectorTab === tab.id 
                     ? "text-[#fca5a5] bg-[#27272a]/70 font-semibold" 
