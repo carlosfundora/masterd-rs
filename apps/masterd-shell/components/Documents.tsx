@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { 
   Search, Filter, Check, X, RefreshCw, FileText, FileSpreadsheet, FileCode, Tag, CheckCircle2, 
   AlertOctagon, AlertTriangle, Eye, ArrowRight, CornerDownRight, History, Hash, Terminal, Sparkles, Folder
@@ -60,19 +60,22 @@ export default function Documents({
   }, [bridge, selectedDocument]);
 
   // Filter lists
-  const filteredDocs = documents.filter(doc => {
-    const matchesSearch = searchTerm === "" || 
-      doc.currentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.originalName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (doc.extractedText && doc.extractedText.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredDocs = useMemo(() => {
+    const searchLower = searchTerm.toLowerCase();
+    return documents.filter(doc => {
+      const matchesSearch = searchTerm === "" ||
+        doc.currentName.toLowerCase().includes(searchLower) ||
+        doc.originalName.toLowerCase().includes(searchLower) ||
+        doc.tags.some(t => t.toLowerCase().includes(searchLower)) ||
+        (doc.extractedText && doc.extractedText.toLowerCase().includes(searchLower));
 
-    const matchesCat = catFilter === "" || doc.classification?.category === catFilter;
-    const matchesStatus = statusFilter === "" || doc.processingStatus === statusFilter;
-    const matchesDupe = dupeFilter === "" || doc.duplicateStatus === dupeFilter;
+      const matchesCat = catFilter === "" || doc.classification?.category === catFilter;
+      const matchesStatus = statusFilter === "" || doc.processingStatus === statusFilter;
+      const matchesDupe = dupeFilter === "" || doc.duplicateStatus === dupeFilter;
 
-    return matchesSearch && matchesCat && matchesStatus && matchesDupe;
-  });
+      return matchesSearch && matchesCat && matchesStatus && matchesDupe;
+    });
+  }, [documents, searchTerm, catFilter, statusFilter, dupeFilter]);
 
   // Action methods
   const handleApproveRename = async (docId: string, customName?: string) => {

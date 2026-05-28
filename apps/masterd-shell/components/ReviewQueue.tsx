@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { 
   AlertTriangle, Check, X, ShieldAlert, BadgeInfo, Eye, ThumbsUp, FileText, 
   Settings, Sliders, CheckSquare, Edit, RefreshCw, CheckCircle2
@@ -29,11 +29,15 @@ export default function ReviewQueue({
   // Active severity filters
   const [severityFilter, setSeverityFilter] = useState<string>("");
 
-  const pendingReviews = reviewQueue.filter(r => !r.resolved);
+  const pendingReviews = useMemo(() => {
+    return reviewQueue.filter(r => !r.resolved);
+  }, [reviewQueue]);
 
-  const filteredReviews = pendingReviews.filter(r => {
-    return severityFilter === "" || r.severity === severityFilter;
-  });
+  const filteredReviews = useMemo(() => {
+    return pendingReviews.filter(r => {
+      return severityFilter === "" || r.severity === severityFilter;
+    });
+  }, [pendingReviews, severityFilter]);
 
   const selectedReview = filteredReviews.find(r => r.id === selectedReviewId) || filteredReviews[0];
 
