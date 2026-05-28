@@ -51,7 +51,7 @@ impl ClassificationLearner {
         if let Some(txt) = content {
             let keywords = self.extract_significant_keywords(txt);
             for kw in keywords.iter() {
-                let doc_scores = self.keyword_mappings.entry(kw.clone()).or_insert_with(HashMap::new);
+                let doc_scores = self.keyword_mappings.entry(kw.clone()).or_default();
                 
                 // Strengthen corrected type
                 let current_score = *doc_scores.get(corrected_type).unwrap_or(&0.0);
@@ -102,12 +102,11 @@ impl ClassificationLearner {
             }
         }
 
-        if !candidates.is_empty() {
-            if let Some((dt, conf)) = candidates.iter().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()) {
+        if !candidates.is_empty()
+            && let Some((dt, conf)) = candidates.iter().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()) {
                 filename_type = Some(dt.clone());
                 filename_confidence = *conf;
             }
-        }
 
         if filename_confidence >= 0.8 {
             return (filename_type, 0.8);

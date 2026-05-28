@@ -90,11 +90,10 @@ impl CancellationSource {
 
     pub fn cancel(&self, reason: impl Into<String>) {
         self.cancelled.store(true, Ordering::SeqCst);
-        if let Ok(mut slot) = self.reason.lock() {
-            if slot.is_none() {
+        if let Ok(mut slot) = self.reason.lock()
+            && slot.is_none() {
                 *slot = Some(reason.into());
             }
-        }
     }
 
     pub fn is_cancelled(&self) -> bool {

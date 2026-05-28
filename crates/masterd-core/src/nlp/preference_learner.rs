@@ -88,8 +88,8 @@ impl PreferenceLearner {
             self.learn_casing(corrected_name);
         }
 
-        if let (Some(orig_f), Some(corr_f)) = (original_folder, corrected_folder) {
-            if orig_f != corr_f {
+        if let (Some(orig_f), Some(corr_f)) = (original_folder, corrected_folder)
+            && orig_f != corr_f {
                 MasterdPersona::scold_general(&format!(
                     "Routing failure detected. Moving document from '{}' to '{}'. Modifying directory associations.",
                     orig_f, corr_f
@@ -99,24 +99,21 @@ impl PreferenceLearner {
                     self.folder_mappings.insert(kw.to_lowercase(), corr_f.to_string());
                 }
             }
-        }
 
-        if let Some(content) = document_content {
-            if let Some(folder) = corrected_folder {
+        if let Some(content) = document_content
+            && let Some(folder) = corrected_folder {
                 self.learn_deep_correlations(corrected_name, folder, content);
             }
-        }
 
         let mut schema_context = HashMap::new();
         if let Some(ctx) = context {
             schema_context = ctx.clone();
         }
 
-        if !schema_context.contains_key("folder") {
-            if let Some(folder) = corrected_folder {
+        if !schema_context.contains_key("folder")
+            && let Some(folder) = corrected_folder {
                 schema_context.insert("folder".to_string(), folder.to_string());
             }
-        }
 
         if original_name != corrected_name {
             self.learn_naming_schema(corrected_name, &schema_context);
@@ -180,11 +177,10 @@ impl PreferenceLearner {
         let text_lower = format!("{} {}", content, filename).to_lowercase();
         
         for (entity, meta) in &self.entity_associations {
-            if text_lower.contains(&entity.to_lowercase()) {
-                if let Some(folder) = &meta.folder {
+            if text_lower.contains(&entity.to_lowercase())
+                && let Some(folder) = &meta.folder {
                     return (folder.clone(), meta.confidence);
                 }
-            }
         }
 
         for (keyword, folder) in &self.folder_mappings {
@@ -295,22 +291,20 @@ impl PreferenceLearner {
             template = self.naming_schemas.get(&format!("folder:{}", f));
         }
         
-        if template.is_none() {
-            if let Some(ent) = entity {
+        if template.is_none()
+            && let Some(ent) = entity {
                 template = self.naming_schemas.get(&format!("entity:{}", ent));
             }
-        }
         
-        if template.is_none() {
-            if let Some(dt) = doc_type {
+        if template.is_none()
+            && let Some(dt) = doc_type {
                 template = self.naming_schemas.get(&format!("type:{}", dt));
             }
-        }
         
         if let Some(t) = template {
             let mut name = t.clone();
-            if name.contains("{entity}") {
-                if let Some(ent) = entity {
+            if name.contains("{entity}")
+                && let Some(ent) = entity {
                     let mut preferred = ent.to_string();
                     if let Some(meta) = self.entity_associations.get(ent) {
                         if let Some(casing) = &meta.preferred_casing {
@@ -331,9 +325,8 @@ impl PreferenceLearner {
                     }
                     name = name.replace("{entity}", &preferred);
                 }
-            }
-            if name.contains("{doc_type}") && doc_type.is_some() {
-                name = name.replace("{doc_type}", doc_type.unwrap());
+            if name.contains("{doc_type}") && let Some(dt) = doc_type {
+                name = name.replace("{doc_type}", dt);
             }
             if name.contains("{date}") {
                 let date_iso = context.get("date").cloned().unwrap_or_else(|| {
@@ -341,21 +334,18 @@ impl PreferenceLearner {
                 });
                 
                 let mut target_format = &self.date_format_preference;
-                if let Some(f) = folder {
-                    if let Some(fmt) = self.contextual_date_formats.get(&format!("folder:{}", f)) {
+                if let Some(f) = folder
+                    && let Some(fmt) = self.contextual_date_formats.get(&format!("folder:{}", f)) {
                         target_format = fmt;
                     }
-                }
-                if let Some(ent) = entity {
-                    if let Some(fmt) = self.contextual_date_formats.get(&format!("entity:{}", ent)) {
+                if let Some(ent) = entity
+                    && let Some(fmt) = self.contextual_date_formats.get(&format!("entity:{}", ent)) {
                         target_format = fmt;
                     }
-                }
-                if let Some(dt) = doc_type {
-                    if let Some(fmt) = self.contextual_date_formats.get(&format!("type:{}", dt)) {
+                if let Some(dt) = doc_type
+                    && let Some(fmt) = self.contextual_date_formats.get(&format!("type:{}", dt)) {
                         target_format = fmt;
                     }
-                }
                 
                 let formatted = if let Ok(parsed) = NaiveDate::parse_from_str(&date_iso, "%Y-%m-%d") {
                     parsed.format(target_format).to_string()
@@ -466,7 +456,7 @@ impl PreferenceLearner {
     
     fn store_correlation(&mut self, target_type: &str, token: &str, reason: &str, confidence: f32) {
         let rule_key = format!("{}:{}", target_type, token);
-        let rules = self.deep_rules.entry(rule_key).or_insert_with(Vec::new);
+        let rules = self.deep_rules.entry(rule_key).or_default();
         
         let mut exists = false;
         for rule in rules.iter_mut() {
@@ -504,19 +494,16 @@ impl PreferenceLearner {
             .collect();
             
         for (key, rules) in &self.deep_rules {
-            if let Some((target_type, token)) = key.split_once(':') {
-                if content_words.contains(token) {
-                    if let Some(best_rule) = rules.iter().max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap()) {
-                        if best_rule.confidence > 0.6 {
+            if let Some((target_type, token)) = key.split_once(':')
+                && content_words.contains(token)
+                    && let Some(best_rule) = rules.iter().max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap())
+                        && best_rule.confidence > 0.6 {
                             if target_type == "name_token" {
                                 suggestions.get_mut("name_hints").unwrap().push(token.to_string());
                             } else if target_type == "folder_token" {
                                 suggestions.get_mut("folder_hints").unwrap().push(token.to_string());
                             }
                         }
-                    }
-                }
-            }
         }
         
         suggestions
@@ -550,13 +537,12 @@ impl PreferenceLearner {
 
         for (ent_name, data) in &self.entity_associations {
             let ent_lower = ent_name.to_lowercase();
-            if text.to_lowercase().contains(&ent_lower) || filename.to_lowercase().contains(&ent_lower) {
-                if let Some(ref f) = data.folder {
+            if (text.to_lowercase().contains(&ent_lower) || filename.to_lowercase().contains(&ent_lower))
+                && let Some(ref f) = data.folder {
                     suggested_folder = f.clone();
                     folder_conf = f32::max(folder_conf, 0.85);
                     break;
                 }
-            }
         }
 
         let mut map = HashMap::new();
@@ -579,5 +565,96 @@ impl PreferenceLearner {
         self.contextual_date_formats.clear();
         self.deep_rules.clear();
         self.correction_count = 0;
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_name_from_schema_folder() {
+        let mut learner = PreferenceLearner::default();
+        learner.naming_schemas.insert("folder:invoices".to_string(), "invoice_{entity}_{date}".to_string());
+
+        let mut context = HashMap::new();
+        context.insert("folder".to_string(), "invoices".to_string());
+        context.insert("entity".to_string(), "Acme Corp".to_string());
+        context.insert("date".to_string(), "2023-10-27".to_string());
+
+        let generated = learner.generate_name_from_schema(&context).unwrap();
+        assert_eq!(generated, "Invoice_Acme Corp_2023-10-27");
+    }
+
+    #[test]
+    fn test_generate_name_from_schema_entity() {
+        let mut learner = PreferenceLearner::default();
+        learner.naming_schemas.insert("entity:Apple".to_string(), "AAPL_{doc_type}_{date}".to_string());
+
+        let mut context = HashMap::new();
+        context.insert("entity".to_string(), "Apple".to_string());
+        context.insert("doc_type".to_string(), "receipt".to_string());
+        context.insert("date".to_string(), "2023-11-01".to_string());
+
+        let generated = learner.generate_name_from_schema(&context).unwrap();
+        assert_eq!(generated, "Aapl_Receipt_2023-11-01");
+    }
+
+    #[test]
+    fn test_generate_name_from_schema_type() {
+        let mut learner = PreferenceLearner::default();
+        learner.naming_schemas.insert("type:contract".to_string(), "Contract-{entity}".to_string());
+
+        let mut context = HashMap::new();
+        context.insert("doc_type".to_string(), "contract".to_string());
+        context.insert("entity".to_string(), "Vendor X".to_string());
+
+        let generated = learner.generate_name_from_schema(&context).unwrap();
+        assert_eq!(generated, "Contract-Vendor X");
+    }
+
+    #[test]
+    fn test_generate_name_from_schema_entity_casing() {
+        let mut learner = PreferenceLearner::default();
+        learner.naming_schemas.insert("type:tax".to_string(), "TAX_{entity}_{date}".to_string());
+
+        let entity_meta = EntityMeta {
+            entity_type: "company".to_string(),
+            folder: None,
+            confidence: 1.0,
+            preferred_casing: Some("Google_LLC".to_string()),
+        };
+        learner.entity_associations.insert("Google".to_string(), entity_meta);
+
+        let mut context = HashMap::new();
+        context.insert("doc_type".to_string(), "tax".to_string());
+        context.insert("entity".to_string(), "Google".to_string());
+        context.insert("date".to_string(), "2024-01-01".to_string());
+
+        let generated = learner.generate_name_from_schema(&context).unwrap();
+        assert_eq!(generated, "Tax_Google_Llc_2024-01-01");
+    }
+
+    #[test]
+    fn test_generate_name_from_schema_date_formatting() {
+        let mut learner = PreferenceLearner::default();
+        learner.naming_schemas.insert("folder:reports".to_string(), "Report_{date}".to_string());
+        learner.contextual_date_formats.insert("folder:reports".to_string(), "%Y_%m".to_string());
+
+        let mut context = HashMap::new();
+        context.insert("folder".to_string(), "reports".to_string());
+        context.insert("date".to_string(), "2023-10-27".to_string());
+
+        let generated = learner.generate_name_from_schema(&context).unwrap();
+        assert_eq!(generated, "Report_2023_10");
+    }
+
+    #[test]
+    fn test_generate_name_from_schema_no_match() {
+        let learner = PreferenceLearner::default();
+        let mut context = HashMap::new();
+        context.insert("folder".to_string(), "unknown".to_string());
+
+        let generated = learner.generate_name_from_schema(&context);
+        assert!(generated.is_none());
     }
 }
