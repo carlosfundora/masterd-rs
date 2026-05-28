@@ -1,0 +1,7 @@
+🎯 **What:** The code health issue addressed was the use of `any` for type casting in `onClick={() => setInspectorTab(tab.id as any)}` in `apps/masterd-shell/components/Documents.tsx`. Extracted the inline union type of tab IDs into an `InspectorTab` type and moved the hardcoded array out of the component scope into a typed constant `INSPECTOR_TABS`.
+
+💡 **Why:** How this improves maintainability: It provides better type safety by ensuring the component state, `setInspectorTab` argument, and `id` property in `INSPECTOR_TABS` conform to the `InspectorTab` literal union type. Removing `as any` eliminates a loose cast, protecting against future regressions if tab types are updated. Moving the array out of the component avoids re-instantiating the object array on every render.
+
+✅ **Verification:** Ran `pnpm lint` and `pnpm build` in the `apps/masterd-shell` directory successfully to confirm no type-check or Next.js build errors were introduced.
+
+✨ **Result:** Improved code readability and correctness by strictly typing the tab configuration and state.
