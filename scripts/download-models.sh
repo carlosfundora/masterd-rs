@@ -122,7 +122,7 @@ verify_optional_file() {
 # Uses `huggingface-hub` Python package if available, otherwise falls back to
 # direct curl with the HuggingFace CDN URL.
 hf_download() {
-  local repo="$1"        # e.g. liquid-ai/LFM2.5-1.2B-Thinking-GGUF
+  local repo="$1"        # e.g. liquidai/LFM2.5-1.2B-Thinking-GGUF
   local filename="$2"    # e.g. LFM2.5-1.2B-Thinking-Q8_0.gguf
   local dest="$3"        # destination file path
   local min_bytes="$4"   # basic sanity check to reject HTML/errors/pointers
@@ -244,19 +244,19 @@ echo ""
 if [[ "${SKIP_CHAT}" == "0" ]]; then
   info "── Downloading LFM2.5-1.2B-Thinking (thinking model) ─────────────────"
   hf_download \
-    "liquid-ai/LFM2.5-1.2B-Thinking-GGUF" \
+    "liquidai/LFM2.5-1.2B-Thinking-GGUF" \
     "LFM2.5-1.2B-Thinking-Q8_0.gguf" \
     "${ROOT_DIR}/models/lfm2.5-1.2b-thinking/LFM2.5-1.2B-Thinking-Q8_0.gguf" \
     1000000000 \
     "LFM2.5-1.2B-Thinking GGUF"
   hf_download \
-    "liquid-ai/LFM2.5-1.2B-Thinking-GGUF" \
+    "liquidai/LFM2.5-1.2B-Thinking-GGUF" \
     "tokenizer.json" \
     "${ROOT_DIR}/models/lfm2.5-1.2b-thinking/tokenizer.json" \
     1000000 \
     "LFM2.5-1.2B-Thinking tokenizer"
   hf_download \
-    "liquid-ai/LFM2.5-1.2B-Thinking-GGUF" \
+    "liquidai/LFM2.5-1.2B-Thinking-GGUF" \
     "tokenizer.chat_template" \
     "${ROOT_DIR}/models/lfm2.5-1.2b-thinking/tokenizer.chat_template" \
     100 \
@@ -264,19 +264,19 @@ if [[ "${SKIP_CHAT}" == "0" ]]; then
 
   info "── Downloading LFM2.5-350M-Instruct (fast instruct model) ────────────"
   hf_download \
-    "liquid-ai/LFM2.5-350M-GGUF" \
+    "liquidai/LFM2.5-350M-GGUF" \
     "LFM2.5-350M-Q8_0.gguf" \
     "${ROOT_DIR}/models/lfm2.5-350m-instruct/LFM2.5-350M-Q8_0.gguf" \
     300000000 \
     "LFM2.5-350M-Instruct GGUF"
   hf_download \
-    "liquid-ai/LFM2.5-350M-GGUF" \
+    "liquidai/LFM2.5-350M-GGUF" \
     "tokenizer.json" \
     "${ROOT_DIR}/models/lfm2.5-350m-instruct/tokenizer.json" \
     1000000 \
     "LFM2.5-350M-Instruct tokenizer"
   hf_download \
-    "liquid-ai/LFM2.5-350M-GGUF" \
+    "liquidai/LFM2.5-350M-GGUF" \
     "tokenizer.chat_template" \
     "${ROOT_DIR}/models/lfm2.5-350m-instruct/tokenizer.chat_template" \
     100 \
@@ -287,7 +287,7 @@ fi
 if [[ "${SKIP_COLBERT}" == "0" ]]; then
   info "── Downloading LFM2-ColBERT-350M (reranker model) ─────────────────────"
   hf_download \
-    "liquid-ai/LFM2-ColBERT-350M-GGUF" \
+    "liquidai/LFM2-ColBERT-350M-GGUF" \
     "LFM2-ColBERT-350M-Q8_0.gguf" \
     "${ROOT_DIR}/models/lfm2-colbert-350m/LFM2-ColBERT-350M-Q8_0.gguf" \
     300000000 \
