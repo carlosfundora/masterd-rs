@@ -139,6 +139,7 @@ export default function Home() {
     if (typeof window === "undefined") return;
 
     const completed = window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === "true";
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTutorialOpen(!completed);
   }, [initLoaded, runtimeError]);
 
