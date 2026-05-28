@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { 
   History, RotateCcw, ShieldCheck, Check, AlertTriangle, User, Bot, 
   Settings, ArrowRight, CornerDownRight, HelpCircle, FileText, Search
@@ -31,16 +31,19 @@ export default function AuditLog({
     }
   };
 
-  const filteredAudits = auditLog.filter(entry => {
-    const matchesSearch = searchTerm === "" || 
-      entry.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (entry.documentId && entry.documentId.toLowerCase().includes(searchTerm.toLowerCase()));
-    
-    const matchesActor = actorFilter === "" || entry.actor === actorFilter;
+  const filteredAudits = useMemo(() => {
+    const searchLower = searchTerm.toLowerCase();
+    return auditLog.filter(entry => {
+      const matchesSearch = searchTerm === "" ||
+        entry.summary.toLowerCase().includes(searchLower) ||
+        entry.action.toLowerCase().includes(searchLower) ||
+        (entry.documentId && entry.documentId.toLowerCase().includes(searchLower));
 
-    return matchesSearch && matchesActor;
-  });
+      const matchesActor = actorFilter === "" || entry.actor === actorFilter;
+
+      return matchesSearch && matchesActor;
+    });
+  }, [auditLog, searchTerm, actorFilter]);
 
   const getActorIcon = (actor: string) => {
     switch (actor) {
