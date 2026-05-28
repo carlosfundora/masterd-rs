@@ -114,16 +114,12 @@ pub struct RetrievalCandidate {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SearchMode {
     Lexical,
     Semantic,
+    #[default]
     Hybrid,
-}
-
-impl Default for SearchMode {
-    fn default() -> Self {
-        Self::Hybrid
-    }
 }
 
 impl SearchMode {
@@ -947,7 +943,13 @@ impl DataStore {
             params![current_name, classification_json, current_path, now(), id],
         )?;
         drop(conn);
-        self.write_audit(id, "resolved_review", "user", "Document resolved and updated after review", true)?;
+        self.write_audit(
+            id,
+            "resolved_review",
+            "user",
+            "Document resolved and updated after review",
+            true,
+        )?;
         self.get_document(id)
     }
 
@@ -988,27 +990,37 @@ impl DataStore {
             params![doc.id],
         )?;
         tx.execute("DELETE FROM chunks WHERE document_id = ?1", params![doc.id])?;
+        let mut stmt_chunks = tx.prepare_cached(
+            "INSERT INTO chunks(id, document_id, chunk_index, text, token_start, token_end, text_hash, source_stage, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        )?;
+        let mut stmt_fts = tx.prepare_cached(
+            "INSERT INTO chunks_fts(chunk_id, document_id, title, path, text) VALUES (?1, ?2, ?3, ?4, ?5)"
+        )?;
+
         for chunk in chunks {
-            tx.execute(
-                "INSERT INTO chunks(id, document_id, chunk_index, text, token_start, token_end, text_hash, source_stage, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
-                    chunk.id,
-                    chunk.document_id,
-                    chunk.chunk_index as i64,
-                    chunk.text,
-                    chunk.token_start as i64,
-                    chunk.token_end as i64,
-                    chunk.text_hash,
-                    chunk.source_stage,
-                    chunk.created_at,
-                ],
-            )?;
-            tx.execute(
-                "INSERT INTO chunks_fts(chunk_id, document_id, title, path, text) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![chunk.id, doc.id, doc.current_name, doc.current_path, chunk.text],
-            )?;
+            stmt_chunks.execute(params![
+                chunk.id,
+                chunk.document_id,
+                chunk.chunk_index as i64,
+                chunk.text,
+                chunk.token_start as i64,
+                chunk.token_end as i64,
+                chunk.text_hash,
+                chunk.source_stage,
+                chunk.created_at,
+            ])?;
+            stmt_fts.execute(params![
+                chunk.id,
+                doc.id,
+                doc.current_name,
+                doc.current_path,
+                chunk.text
+            ])?;
         }
+
+        drop(stmt_chunks);
+        drop(stmt_fts);
         tx.commit()?;
         Ok(())
     }
@@ -1099,13 +1111,12 @@ impl DataStore {
         let mut merged =
             rrf_merge_candidates(candidates, top_k.saturating_mul(2).max(top_k).max(1));
         let mut reranked = false;
-        if let Some(reranker) = &self.reranker {
-            if let Ok(results) = reranker.rerank(query, &merged, top_k.max(1)) {
-                if !results.is_empty() {
-                    merged = results;
-                    reranked = true;
-                }
-            }
+        if let Some(reranker) = &self.reranker
+            && let Ok(results) = reranker.rerank(query, &merged, top_k.max(1))
+            && !results.is_empty()
+        {
+            merged = results;
+            reranked = true;
         }
         stages.push(RetrievalStageTrace {
             stage: "colbert_rerank".to_string(),
@@ -1391,12 +1402,11 @@ impl DataStore {
     }
 
     fn lexical_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
-        if let Some(meili) = &self.meili {
-            if let Ok(results) = meili.search_chunks(query, limit) {
-                if !results.is_empty() {
-                    return Ok(results);
-                }
-            }
+        if let Some(meili) = &self.meili
+            && let Ok(results) = meili.search_chunks(query, limit)
+            && !results.is_empty()
+        {
+            return Ok(results);
         }
         let conn = self
             .conn
@@ -1409,7 +1419,7 @@ impl DataStore {
                  ORDER BY d.updated_at DESC LIMIT ?1",
             )?;
             let rows = stmt.query_map(params![limit as i64], |row| {
-                Ok(candidate_from_row(row, "lexical")?)
+                candidate_from_row(row, "lexical")
             })?;
             return rows
                 .collect::<std::result::Result<Vec<_>, _>>()
@@ -1427,7 +1437,7 @@ impl DataStore {
              LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
-            Ok(candidate_from_row(row, "lexical")?)
+            candidate_from_row(row, "lexical")
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
@@ -1439,10 +1449,10 @@ impl DataStore {
             .as_ref()
             .and_then(|client| client.embed_one(query).ok());
         let mut out = Vec::new();
-        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref()) {
-            if let Ok(mut results) = lancedb.search(query_vector, limit) {
-                out.append(&mut results);
-            }
+        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref())
+            && let Ok(mut results) = lancedb.search(query_vector, limit)
+        {
+            out.append(&mut results);
         }
         if let Some(mut jina) = self.semantic_search_table(
             "embeddings",
@@ -1665,33 +1675,33 @@ impl DataStore {
                 metadata: jina_profile.metadata_context,
             });
 
-            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref() {
-                if let Some(embedding) = model2vec_embeddings.get(index) {
-                    let vector = embedding.clone();
-                    let vector_json = serde_json::to_string(&vector)?;
-                    let vector_hash = sha256_hex(vector_json.as_bytes());
-                    let profile =
-                        build_matryoshka_profile(&model2vec_provider, chunk, &vector, vector.len());
-                    tx.execute(
-                        "INSERT OR REPLACE INTO embeddings_model2vec(
+            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref()
+                && let Some(embedding) = model2vec_embeddings.get(index)
+            {
+                let vector = embedding.clone();
+                let vector_json = serde_json::to_string(&vector)?;
+                let vector_hash = sha256_hex(vector_json.as_bytes());
+                let profile =
+                    build_matryoshka_profile(&model2vec_provider, chunk, &vector, vector.len());
+                tx.execute(
+                    "INSERT OR REPLACE INTO embeddings_model2vec(
                             chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
                             lexical_context, metadata_json, colbert_token_hash, created_at
                          )
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                        params![
-                            chunk.id,
-                            &model2vec_provider,
-                            vector.len() as i64,
-                            vector_json,
-                            vector_hash,
-                            serde_json::to_string(&profile)?,
-                            profile.lexical_context,
-                            serde_json::to_string(&profile.metadata_context)?,
-                            profile.colbert_token_hash,
-                            now()
-                        ],
-                    )?;
-                }
+                    params![
+                        chunk.id,
+                        &model2vec_provider,
+                        vector.len() as i64,
+                        vector_json,
+                        vector_hash,
+                        serde_json::to_string(&profile)?,
+                        profile.lexical_context,
+                        serde_json::to_string(&profile.metadata_context)?,
+                        profile.colbert_token_hash,
+                        now()
+                    ],
+                )?;
             }
         }
         tx.commit()?;
@@ -1775,7 +1785,7 @@ impl DataStore {
                 ",
             )?;
             let rows = stmt.query_map(params![seed, limit as i64], |row| {
-                Ok(candidate_from_row(row, "graph_expansion")?)
+                candidate_from_row(row, "graph_expansion")
             })?;
             out.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
         }
@@ -2095,15 +2105,14 @@ pub fn chunk_text(
 }
 
 fn document_sections(text: &str, extension: &str) -> Vec<(String, String)> {
-    if extension == "rs" {
-        if let Some(sections) = rust_structured_sections(text) {
-            if !sections.is_empty() {
-                return sections
-                    .into_iter()
-                    .map(|section| ("ast_section".to_string(), section))
-                    .collect();
-            }
-        }
+    if extension == "rs"
+        && let Some(sections) = rust_structured_sections(text)
+        && !sections.is_empty()
+    {
+        return sections
+            .into_iter()
+            .map(|section| ("ast_section".to_string(), section))
+            .collect();
     }
     semantic_units(text)
         .into_iter()
@@ -2133,12 +2142,11 @@ fn rust_structured_sections(text: &str) -> Option<Vec<String>> {
                 | "const_item"
                 | "static_item"
                 | "use_declaration"
-        ) {
-            if let Ok(snippet) = child.utf8_text(text.as_bytes()) {
-                let snippet = snippet.trim();
-                if !snippet.is_empty() {
-                    sections.push(snippet.to_string());
-                }
+        ) && let Ok(snippet) = child.utf8_text(text.as_bytes())
+        {
+            let snippet = snippet.trim();
+            if !snippet.is_empty() {
+                sections.push(snippet.to_string());
             }
         }
     }
