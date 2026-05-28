@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2026-05-28
+
+### Changed
+- Workspace lints central management: added `[workspace.lints.rust]` to root `Cargo.toml` and enabled `[lints] workspace = true` inheritance in `crates/rs_turboquant_codec/Cargo.toml` to suppress compiler warnings cleanly.
+
 ## [0.1.4] - 2026-05-27
 
 ### Added
