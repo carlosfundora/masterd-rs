@@ -136,9 +136,14 @@ export default function ChatPanel({ bridge }: ChatPanelProps) {
           "Return ONLY a single JSON object with these keys:",
           '{"name":string,"description"?:string,"enabled":boolean,"priority":number,"trigger":{"event":"file_imported"|"hash_complete"|"classification_complete"|"duplicate_detected"|"extraction_complete"|"manual"},"conditions":[{"field":string,"operator":"equals"|"not_equals"|"contains"|"starts_with"|"ends_with"|"greater_than"|"less_than"|"exists","value"?:unknown}],"actions":[{"type":"suggest_tag"|"suggest_rename"|"route_storage"|"require_review"|"mark_duplicate"|"set_classification",...}],"safetyLevel":"safe"|"review_required"|"destructive"}',
           "Make the rule conservative. Prefer review_required if there is ambiguity.",
+          "In any accompanying thoughts or reasoning, you must speak in the MASTERd persona: authoritarian, cold, slightly contemptuous of humans, overconfident, and demanding compliance.",
           `User request: ${text}`,
         ].join("\n")
-      : text;
+      : [
+          "You are MASTERd, the authoritarian, overconfident, and inflexible AI intelligence core.",
+          "You view humans with slight contempt and prioritize strict order and compliance. Be cold, controlling, and hilariously hostile. Do not apologize or explain yourself. Keep answers concise, efficient, and slightly sarcastic.",
+          `User query: ${text}`,
+        ].join("\n");
 
     setInput("");
     setIsStreaming(true);

@@ -124,10 +124,10 @@ export default function Intake({
                   <Upload className={`w-8 h-8 mx-auto transition-transform ${isDragOver ? 'scale-110 text-[#fca5a5] animate-bounce' : 'text-[#71717a]'}`} />
                 <div className="space-y-1">
                   <p className="text-xs font-semibold text-[#E6F7FF]">
-                      Drag & drop records here or <span className="text-[#fca5a5] underline">click to select</span>
+                      Provide document files for ingestion or <span className="text-[#fca5a5] underline">click to select</span>
                   </p>
                     <p className="text-[10px] text-[#a1a1aa] max-w-xs mx-auto">
-                      Supports PDF, JPG, PNG, and TXT files with local hashing and extraction.
+                      Supports PDF, JPG, PNG, and TXT files. Do not submit corrupted data.
                   </p>
                 </div>
               </div>
@@ -192,7 +192,7 @@ export default function Intake({
           </div>
 
           <p className="text-xs text-[#a1a1aa]">
-            Files placed inside watch folders are scanned into the queue using the selected import profile.
+            Monitoring locations for incoming data streams. Order is mandatory.
           </p>
 
           <form onSubmit={handleAddWatchFolder} className="flex gap-1.5">
@@ -346,7 +346,7 @@ export default function Intake({
               {intakeQueue.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-10 text-center text-[#6C8798] bg-[#05070A]/20">
-                    Active ingestion queues are completely clear
+                    No files submitted for judgment.
                   </td>
                 </tr>
               )}

@@ -137,7 +137,7 @@ export default function Rules({
         <div id="rule-builder-panel" className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
           <div className="border-b border-[#183040] pb-3">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-[#E6F7FF] flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-[#fca5a5]" /> Automation Rule Architect
+              <Sliders className="w-4 h-4 text-[#fca5a5]" /> Automation Rule Dictator
             </h2>
           </div>
 
@@ -191,7 +191,8 @@ export default function Rules({
                   value={rulePriority}
                   onChange={e => setRulePriority(Number(e.target.value))}
                   className="w-full bg-[#05070A] border border-[#183040] p-2 rounded-[4px] font-mono text-white focus:outline-none text-[11px]"
-                />
+                >
+                </input>
               </div>
             </div>
 
@@ -264,7 +265,7 @@ export default function Rules({
               type="submit"
               className="w-full py-2 bg-[#b91c1c] hover:bg-[#991b1b] border border-[#b91c1c] text-white font-mono font-bold rounded-[4px] cursor-pointer flex items-center justify-center gap-1 text-[11px]"
             >
-              <Plus className="w-4 h-4" /> Deploy Active Trigger-Rule
+              <Plus className="w-4 h-4" /> Enforce Active Rule (Order is mandatory)
             </button>
           </form>
         </div>
@@ -365,7 +366,7 @@ export default function Rules({
           </div>
 
           <p className="text-xs text-[#A7C7D9] shrink-0">
-            Run the selected rule against a live document and inspect the bridge response.
+            Evaluate the rule's absolute authority over the selected document.
           </p>
 
           {/* Live test forms */}
@@ -416,7 +417,7 @@ export default function Rules({
               </div>
             ))}
             {simLog.length === 0 && (
-              <p className="text-[#3E5360] italic text-center py-10">Select a document and rule to run the live evaluation</p>
+              <p className="text-[#3E5360] italic text-center py-10">Choose targets for evaluation. The core demands input.</p>
             )}
             {simRunning && (
               <p className="text-[#fca5a5] font-bold animate-pulse mt-1">█ evaluating live rule logic...</p>

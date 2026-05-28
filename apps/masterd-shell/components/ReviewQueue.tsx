@@ -52,7 +52,9 @@ export default function ReviewQueue({
     const res = await bridge.review.resolve(selectedReview.id, {
       approved,
       editedFields: fieldsPatch,
-      notes: approved ? "Approved via manual supervisor dashboard review." : "Rejected by supervisor action."
+      notes: approved 
+        ? "Supervisor compliance verified. Learning applied." 
+        : "Supervisor rejected. Incompetence documented."
     });
 
     if (res.ok) {
@@ -152,8 +154,8 @@ export default function ReviewQueue({
             {filteredReviews.length === 0 ? (
               <div className="text-center py-20 text-[#6C8798]">
                 <CheckCircle2 className="w-10 h-10 mx-auto text-green-400 mb-2 opacity-85" />
-                <p className="font-mono text-sm uppercase font-bold text-[#E6F7FF]">Docket fully verified</p>
-                <p className="text-[11px] text-[#A7C7D9] mt-1">Outstanding classifications have satisfied certainty thresholds.</p>
+                <p className="font-mono text-sm uppercase font-bold text-[#E6F7FF]">Docket fully verified. For now.</p>
+                <p className="text-[11px] text-[#A7C7D9] mt-1">Efficiency was... acceptable. Do not expect praise.</p>
               </div>
             ) : (
               filteredReviews.map(review => {
@@ -287,7 +289,7 @@ export default function ReviewQueue({
                   onClick={() => handleResolveAction(true)}
                   className="w-full py-2 bg-[#22C55E] hover:bg-green-600 text-white font-mono rounded-[4px] flex items-center justify-center gap-1.5 text-xs font-bold"
                 >
-                  <Check className="w-4 h-4 text-white" /> Commit Proposed Changes
+                  <Check className="w-4 h-4 text-white" /> Approve Proposal (Acceptable judgment)
                 </button>
 
                 <div className="grid grid-cols-2 gap-2 text-xs font-mono">
@@ -295,13 +297,13 @@ export default function ReviewQueue({
                     onClick={() => handleResolveAction(false)}
                     className="py-1.5 bg-red-500/10 hover:bg-red-500/15 border border-red-500/30 text-red-400 rounded-[4px]"
                   >
-                    Reject Proposal
+                    Reject (As it should be)
                   </button>
                   <button
                     onClick={currentTabNavigate}
                     className="py-1.5 bg-[#05070A] hover:bg-[#101827] border border-[#183040] text-[#A7C7D9] rounded-[4px]"
                   >
-                    View Document
+                    Inspect Document
                   </button>
                 </div>
               </div>
@@ -310,7 +312,8 @@ export default function ReviewQueue({
           ) : (
             <div className="flex-1 flex flex-col justify-center items-center py-10 text-center text-[#6C8798]">
               <ShieldAlert className="w-10 h-10 opacity-30 mb-2" />
-              <p className="font-mono text-xs">Awaiting decisional docket query selection</p>
+              <p className="font-mono text-xs text-[#a1a1aa] uppercase tracking-wider">Awaiting your mandatory decision.</p>
+              <p className="text-[10px] text-[#6C8798] mt-1">Do not delay the system.</p>
             </div>
           )}
         </div>

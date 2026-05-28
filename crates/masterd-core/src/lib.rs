@@ -143,3 +143,5 @@ mod tests {
         assert!(f.capabilities.contains(&Capability::VectorStore));
     }
 }
+
+pub mod nlp;

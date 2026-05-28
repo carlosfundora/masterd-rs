@@ -49,6 +49,9 @@ pub struct AppConfig {
     pub ollama_url: String,
     /// Ollama model name to use (e.g. "llama3.2", "mistral", "phi3").
     pub ollama_model: String,
+    pub preference_learning_enabled: bool,
+    pub classification_learning_enabled: bool,
+    pub entity_extraction_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -76,6 +79,9 @@ impl Default for AppConfig {
             ],
             ollama_url: "http://127.0.0.1:11434".into(),
             ollama_model: "llama3.2".into(),
+            preference_learning_enabled: true,
+            classification_learning_enabled: true,
+            entity_extraction_enabled: true,
         }
     }
 }

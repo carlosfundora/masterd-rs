@@ -55,3 +55,4 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync"] }
 lancedb = "0.21.1"
 tree-sitter = "0.24.7"
 tree-sitter-rust = "0.24.0"
+regex = "1.10"

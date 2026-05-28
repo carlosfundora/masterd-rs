@@ -26,6 +26,9 @@ const DEFAULT_CONFIG: AppConfig = {
   intakeExtensions: ["txt", "md", "rst", "log", "pdf"],
   ollamaUrl: "http://127.0.0.1:11434",
   ollamaModel: "llama3.2",
+  preferenceLearningEnabled: true,
+  classificationLearningEnabled: true,
+  entityExtractionEnabled: true,
 };
 
 export default function Settings({ refreshState }: SettingsProps) {
@@ -174,8 +177,8 @@ export default function Settings({ refreshState }: SettingsProps) {
           </div>
         </div>
 
-        {/* Row 2: Retrieval + Embedding Services */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Row 2: Retrieval + Embedding Services + Learning */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* Retrieval Tuning */}
           <div className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
@@ -222,6 +225,54 @@ export default function Settings({ refreshState }: SettingsProps) {
                   <label className={label}>Jina Embedding URL</label>
                   <input type="text" value={cfg.jinaUrl} onChange={e => set("jinaUrl", e.target.value)} className={field} />
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Intelligence & Learning */}
+          <div className="bg-[#0B1018] border border-[#183040] p-5 rounded-[4px] space-y-4">
+            <div className="border-b border-[#183040] pb-3 flex items-center gap-2">
+              <Bot className="w-4 h-4 text-[#fca5a5]" />
+              <h2 className="text-sm font-semibold uppercase tracking-wider">Intelligence & Learning</h2>
+            </div>
+            <div className="space-y-4 text-xs">
+              <div className="flex items-center justify-between p-2 bg-[#09090b] border border-[#27272a] rounded-[4px]">
+                <div className="flex flex-col">
+                  <label className="text-[11px] font-semibold text-[#f4f4f5]">Preference Learning</label>
+                  <span className="text-[9px] text-[#6C8798]">Auto-learn file naming schemas & paths</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={cfg.preferenceLearningEnabled}
+                  onChange={e => set("preferenceLearningEnabled", e.target.checked)}
+                  className="w-4 h-4 accent-[#b91c1c] cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-[#09090b] border border-[#27272a] rounded-[4px]">
+                <div className="flex flex-col">
+                  <label className="text-[11px] font-semibold text-[#f4f4f5]">Classification Learning</label>
+                  <span className="text-[9px] text-[#6C8798]">Deduce categories based on folder moves</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={cfg.classificationLearningEnabled}
+                  onChange={e => set("classificationLearningEnabled", e.target.checked)}
+                  className="w-4 h-4 accent-[#b91c1c] cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-[#09090b] border border-[#27272a] rounded-[4px]">
+                <div className="flex flex-col">
+                  <label className="text-[11px] font-semibold text-[#f4f4f5]">Entity Extraction</label>
+                  <span className="text-[9px] text-[#6C8798]">Extract fields (Dates, Amounts, Names)</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={cfg.entityExtractionEnabled}
+                  onChange={e => set("entityExtractionEnabled", e.target.checked)}
+                  className="w-4 h-4 accent-[#b91c1c] cursor-pointer"
+                />
               </div>
             </div>
           </div>

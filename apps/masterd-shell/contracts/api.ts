@@ -418,6 +418,9 @@ export type AppConfig = {
   ollamaUrl: string;
   /** Ollama model name (e.g. "llama3.2", "mistral"). */
   ollamaModel: string;
+  preferenceLearningEnabled: boolean;
+  classificationLearningEnabled: boolean;
+  entityExtractionEnabled: boolean;
 };
 
 export interface MasterdFrontendBridge {

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2026-05-27
+
+### Added
+- Exposed Preference Learning, Classification Learning, and Entity Extraction configurations in settings panel and synced with Rust backend config structures.
+- Injected authoritarian, cold, and hilariously hostile MASTERd AI persona system instructions into ChatPanel prompts.
+- Customized buttons, placeholders, empty states, and log notes in Intake, Rules, and Review Queue views to adopt the overconfident, slightly contemptuous tone.
+
 ## [0.1.3] - 2026-05-27
 
 ### Added
