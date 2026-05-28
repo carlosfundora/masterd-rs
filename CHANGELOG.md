@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [0.1.5] - 2026-05-28
 
 ### Changed
-- Workspace lints central management: added `[workspace.lints.rust]` to root `Cargo.toml` and enabled `[lints] workspace = true` inheritance in `crates/rs_turboquant_codec/Cargo.toml` to suppress compiler warnings cleanly.
+- Workspace lints central management: added `[workspace.lints.rust]` to root `Cargo.toml` and enabled `[lints] workspace = true` inheritance in `crates/rs_turboquant_codec/Cargo.toml` and `crates/rs_rotorquant_codec/Cargo.toml` to suppress compiler warnings cleanly.
+
+### Fixed
+- Fixed compile error in `rs_rotorquant_codec` by changing `rand` dependency version from `0.9` to `0.8` to align and resolve trait version mismatch with `rand_chacha = "0.3"`.
+- Fixed compile error in `candle-core` by reverting the broken Dependabot bump of `rand` (from `0.10.1` back to `0.9.0`) in `vendor/candle/Cargo.toml` to restore compatibility with `half` and `rand_distr`.
+
 
 ## [0.1.4] - 2026-05-27
 
