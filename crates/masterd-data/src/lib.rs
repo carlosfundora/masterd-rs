@@ -1512,18 +1512,20 @@ impl DataStore {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
             let tx = conn.transaction()?;
-            for (chunk, vector) in pending.iter().zip(embeddings.iter()) {
-                let vector_json = serde_json::to_string(vector)?;
-                let vector_hash = sha256_hex(vector_json.as_bytes());
-                let profile =
-                    build_matryoshka_profile(&client.model_name, chunk, vector, vector.len());
-                tx.execute(
+            {
+                let mut stmt = tx.prepare(
                     "INSERT OR REPLACE INTO embeddings_model2vec(
                         chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
                         lexical_context, metadata_json, colbert_token_hash, created_at
                      )
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![
+                )?;
+                for (chunk, vector) in pending.iter().zip(embeddings.iter()) {
+                    let vector_json = serde_json::to_string(vector)?;
+                    let vector_hash = sha256_hex(vector_json.as_bytes());
+                    let profile =
+                        build_matryoshka_profile(&client.model_name, chunk, vector, vector.len());
+                    stmt.execute(params![
                         chunk.id,
                         &client.model_name,
                         vector.len() as i64,
@@ -1534,9 +1536,9 @@ impl DataStore {
                         serde_json::to_string(&profile.metadata_context)?,
                         profile.colbert_token_hash,
                         now()
-                    ],
-                )?;
-                inserted += 1;
+                    ])?;
+                    inserted += 1;
+                }
             }
             tx.commit()?;
 
@@ -1628,23 +1630,25 @@ impl DataStore {
             .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let tx = conn.transaction()?;
         let mut lance_records = Vec::new();
-        for (index, chunk) in chunks.iter().enumerate() {
-            let jina_vector = jina_embeddings
-                .as_ref()
-                .and_then(|batch| batch.get(index))
-                .map(|embedding| embedding.vector.clone())
-                .unwrap_or_else(|| hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM));
-            let jina_vector_json = serde_json::to_string(&jina_vector)?;
-            let jina_vector_hash = sha256_hex(jina_vector_json.as_bytes());
-            let jina_profile =
-                build_matryoshka_profile(&jina_provider, chunk, &jina_vector, jina_vector.len());
-            tx.execute(
+        {
+            let mut jina_stmt = tx.prepare(
                 "INSERT OR REPLACE INTO embeddings(
                     chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
                     lexical_context, metadata_json, colbert_token_hash, created_at
                  )
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![
+            )?;
+            for (index, chunk) in chunks.iter().enumerate() {
+                let jina_vector = jina_embeddings
+                    .as_ref()
+                    .and_then(|batch| batch.get(index))
+                    .map(|embedding| embedding.vector.clone())
+                    .unwrap_or_else(|| hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM));
+                let jina_vector_json = serde_json::to_string(&jina_vector)?;
+                let jina_vector_hash = sha256_hex(jina_vector_json.as_bytes());
+                let jina_profile =
+                    build_matryoshka_profile(&jina_provider, chunk, &jina_vector, jina_vector.len());
+                jina_stmt.execute(params![
                     chunk.id,
                     jina_provider,
                     jina_vector.len() as i64,
@@ -1655,8 +1659,7 @@ impl DataStore {
                     serde_json::to_string(&jina_profile.metadata_context)?,
                     jina_profile.colbert_token_hash,
                     now()
-                ],
-            )?;
+                ])?;
             lance_records.push(LanceVectorRecord {
                 id: chunk.id.clone(),
                 document_id: chunk.document_id.clone(),
@@ -1665,32 +1668,35 @@ impl DataStore {
                 metadata: jina_profile.metadata_context,
             });
 
-            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref() {
+            }
+        }
+        if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref() {
+            let mut m2v_stmt = tx.prepare(
+                "INSERT OR REPLACE INTO embeddings_model2vec(
+                    chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
+                    lexical_context, metadata_json, colbert_token_hash, created_at
+                 )
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            )?;
+            for (index, chunk) in chunks.iter().enumerate() {
                 if let Some(embedding) = model2vec_embeddings.get(index) {
                     let vector = embedding.clone();
                     let vector_json = serde_json::to_string(&vector)?;
                     let vector_hash = sha256_hex(vector_json.as_bytes());
                     let profile =
                         build_matryoshka_profile(&model2vec_provider, chunk, &vector, vector.len());
-                    tx.execute(
-                        "INSERT OR REPLACE INTO embeddings_model2vec(
-                            chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
-                            lexical_context, metadata_json, colbert_token_hash, created_at
-                         )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                        params![
-                            chunk.id,
-                            &model2vec_provider,
-                            vector.len() as i64,
-                            vector_json,
-                            vector_hash,
-                            serde_json::to_string(&profile)?,
-                            profile.lexical_context,
-                            serde_json::to_string(&profile.metadata_context)?,
-                            profile.colbert_token_hash,
-                            now()
-                        ],
-                    )?;
+                    m2v_stmt.execute(params![
+                        chunk.id,
+                        &model2vec_provider,
+                        vector.len() as i64,
+                        vector_json,
+                        vector_hash,
+                        serde_json::to_string(&profile)?,
+                        profile.lexical_context,
+                        serde_json::to_string(&profile.metadata_context)?,
+                        profile.colbert_token_hash,
+                        now()
+                    ])?;
                 }
             }
         }
