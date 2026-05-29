@@ -114,17 +114,14 @@ pub struct RetrievalCandidate {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SearchMode {
     Lexical,
     Semantic,
+    #[default]
     Hybrid,
 }
 
-impl Default for SearchMode {
-    fn default() -> Self {
-        Self::Hybrid
-    }
-}
 
 impl SearchMode {
     pub fn from_str_lossy(value: &str) -> Self {
@@ -1099,14 +1096,12 @@ impl DataStore {
         let mut merged =
             rrf_merge_candidates(candidates, top_k.saturating_mul(2).max(top_k).max(1));
         let mut reranked = false;
-        if let Some(reranker) = &self.reranker {
-            if let Ok(results) = reranker.rerank(query, &merged, top_k.max(1)) {
-                if !results.is_empty() {
+        if let Some(reranker) = &self.reranker
+            && let Ok(results) = reranker.rerank(query, &merged, top_k.max(1))
+                && !results.is_empty() {
                     merged = results;
                     reranked = true;
                 }
-            }
-        }
         stages.push(RetrievalStageTrace {
             stage: "colbert_rerank".to_string(),
             count: merged.len(),
@@ -1391,13 +1386,11 @@ impl DataStore {
     }
 
     fn lexical_search(&self, query: &str, limit: usize) -> Result<Vec<RetrievalCandidate>> {
-        if let Some(meili) = &self.meili {
-            if let Ok(results) = meili.search_chunks(query, limit) {
-                if !results.is_empty() {
+        if let Some(meili) = &self.meili
+            && let Ok(results) = meili.search_chunks(query, limit)
+                && !results.is_empty() {
                     return Ok(results);
                 }
-            }
-        }
         let conn = self
             .conn
             .lock()
@@ -1409,7 +1402,7 @@ impl DataStore {
                  ORDER BY d.updated_at DESC LIMIT ?1",
             )?;
             let rows = stmt.query_map(params![limit as i64], |row| {
-                Ok(candidate_from_row(row, "lexical")?)
+                candidate_from_row(row, "lexical")
             })?;
             return rows
                 .collect::<std::result::Result<Vec<_>, _>>()
@@ -1427,7 +1420,7 @@ impl DataStore {
              LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
-            Ok(candidate_from_row(row, "lexical")?)
+            candidate_from_row(row, "lexical")
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
@@ -1439,11 +1432,10 @@ impl DataStore {
             .as_ref()
             .and_then(|client| client.embed_one(query).ok());
         let mut out = Vec::new();
-        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref()) {
-            if let Ok(mut results) = lancedb.search(query_vector, limit) {
+        if let (Some(lancedb), Some(query_vector)) = (&self.lancedb, jina_query_vector.as_ref())
+            && let Ok(mut results) = lancedb.search(query_vector, limit) {
                 out.append(&mut results);
             }
-        }
         if let Some(mut jina) = self.semantic_search_table(
             "embeddings",
             "semantic_jina",
@@ -1665,8 +1657,8 @@ impl DataStore {
                 metadata: jina_profile.metadata_context,
             });
 
-            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref() {
-                if let Some(embedding) = model2vec_embeddings.get(index) {
+            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref()
+                && let Some(embedding) = model2vec_embeddings.get(index) {
                     let vector = embedding.clone();
                     let vector_json = serde_json::to_string(&vector)?;
                     let vector_hash = sha256_hex(vector_json.as_bytes());
@@ -1692,7 +1684,6 @@ impl DataStore {
                         ],
                     )?;
                 }
-            }
         }
         tx.commit()?;
         if let Some(lancedb) = &self.lancedb {
@@ -1775,7 +1766,7 @@ impl DataStore {
                 ",
             )?;
             let rows = stmt.query_map(params![seed, limit as i64], |row| {
-                Ok(candidate_from_row(row, "graph_expansion")?)
+                candidate_from_row(row, "graph_expansion")
             })?;
             out.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
         }
@@ -2095,16 +2086,14 @@ pub fn chunk_text(
 }
 
 fn document_sections(text: &str, extension: &str) -> Vec<(String, String)> {
-    if extension == "rs" {
-        if let Some(sections) = rust_structured_sections(text) {
-            if !sections.is_empty() {
+    if extension == "rs"
+        && let Some(sections) = rust_structured_sections(text)
+            && !sections.is_empty() {
                 return sections
                     .into_iter()
                     .map(|section| ("ast_section".to_string(), section))
                     .collect();
             }
-        }
-    }
     semantic_units(text)
         .into_iter()
         .map(|section| ("semantic_section".to_string(), section))
@@ -2133,14 +2122,13 @@ fn rust_structured_sections(text: &str) -> Option<Vec<String>> {
                 | "const_item"
                 | "static_item"
                 | "use_declaration"
-        ) {
-            if let Ok(snippet) = child.utf8_text(text.as_bytes()) {
+        )
+            && let Ok(snippet) = child.utf8_text(text.as_bytes()) {
                 let snippet = snippet.trim();
                 if !snippet.is_empty() {
                     sections.push(snippet.to_string());
                 }
             }
-        }
     }
     Some(sections)
 }
@@ -3307,9 +3295,24 @@ fn to_json_opt<T: Serialize>(value: &Option<T>) -> Result<Option<String>> {
 
 fn hashed_embedding(text: &str, dim: usize) -> Vec<f32> {
     let mut vector = vec![0.0f32; dim.max(8)];
+    let len = vector.len();
+
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64];
+
     for token in text.split_whitespace() {
-        let digest = Sha256::digest(token.to_ascii_lowercase().as_bytes());
-        let idx = u64::from_le_bytes(digest[0..8].try_into().unwrap()) as usize % vector.len();
+        let n = token.len();
+        if n <= 64 {
+            buf[..n].copy_from_slice(token.as_bytes());
+            buf[..n].make_ascii_lowercase();
+            hasher.update(&buf[..n]);
+        } else {
+            hasher.update(token.to_ascii_lowercase().as_bytes());
+        }
+
+        let digest = hasher.finalize_reset();
+
+        let idx = u64::from_le_bytes(digest[0..8].try_into().unwrap()) as usize % len;
         let sign = if digest[8] & 1 == 0 { 1.0 } else { -1.0 };
         vector[idx] += sign;
     }
