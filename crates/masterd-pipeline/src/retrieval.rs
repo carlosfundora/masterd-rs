@@ -197,13 +197,19 @@ impl RetrievalPipeline {
 }
 
 fn dedup_by_score(candidates: Vec<RetrievalCandidate>) -> Vec<RetrievalCandidate> {
+    use std::collections::hash_map::Entry;
+
     let mut best: HashMap<String, RetrievalCandidate> = HashMap::new();
     for candidate in candidates {
-        let entry = best
-            .entry(candidate.doc_id.clone())
-            .or_insert_with(|| candidate.clone());
-        if candidate.score > entry.score {
-            *entry = candidate;
+        match best.entry(candidate.doc_id.clone()) {
+            Entry::Occupied(mut entry) => {
+                if candidate.score > entry.get().score {
+                    entry.insert(candidate);
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(candidate);
+            }
         }
     }
     best.into_values().collect()

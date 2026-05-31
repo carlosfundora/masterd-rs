@@ -1522,18 +1522,20 @@ impl DataStore {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
             let tx = conn.transaction()?;
-            for (chunk, vector) in pending.iter().zip(embeddings.iter()) {
-                let vector_json = serde_json::to_string(vector)?;
-                let vector_hash = sha256_hex(vector_json.as_bytes());
-                let profile =
-                    build_matryoshka_profile(&client.model_name, chunk, vector, vector.len());
-                tx.execute(
+            {
+                let mut stmt = tx.prepare(
                     "INSERT OR REPLACE INTO embeddings_model2vec(
                         chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
                         lexical_context, metadata_json, colbert_token_hash, created_at
                      )
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![
+                )?;
+                for (chunk, vector) in pending.iter().zip(embeddings.iter()) {
+                    let vector_json = serde_json::to_string(vector)?;
+                    let vector_hash = sha256_hex(vector_json.as_bytes());
+                    let profile =
+                        build_matryoshka_profile(&client.model_name, chunk, vector, vector.len());
+                    stmt.execute(params![
                         chunk.id,
                         &client.model_name,
                         vector.len() as i64,
@@ -1544,9 +1546,9 @@ impl DataStore {
                         serde_json::to_string(&profile.metadata_context)?,
                         profile.colbert_token_hash,
                         now()
-                    ],
-                )?;
-                inserted += 1;
+                    ])?;
+                    inserted += 1;
+                }
             }
             tx.commit()?;
 
@@ -1638,23 +1640,25 @@ impl DataStore {
             .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let tx = conn.transaction()?;
         let mut lance_records = Vec::new();
-        for (index, chunk) in chunks.iter().enumerate() {
-            let jina_vector = jina_embeddings
-                .as_ref()
-                .and_then(|batch| batch.get(index))
-                .map(|embedding| embedding.vector.clone())
-                .unwrap_or_else(|| hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM));
-            let jina_vector_json = serde_json::to_string(&jina_vector)?;
-            let jina_vector_hash = sha256_hex(jina_vector_json.as_bytes());
-            let jina_profile =
-                build_matryoshka_profile(&jina_provider, chunk, &jina_vector, jina_vector.len());
-            tx.execute(
+        {
+            let mut jina_stmt = tx.prepare(
                 "INSERT OR REPLACE INTO embeddings(
                     chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
                     lexical_context, metadata_json, colbert_token_hash, created_at
                  )
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![
+            )?;
+            for (index, chunk) in chunks.iter().enumerate() {
+                let jina_vector = jina_embeddings
+                    .as_ref()
+                    .and_then(|batch| batch.get(index))
+                    .map(|embedding| embedding.vector.clone())
+                    .unwrap_or_else(|| hashed_embedding(&chunk.text, DEFAULT_EMBED_DIM));
+                let jina_vector_json = serde_json::to_string(&jina_vector)?;
+                let jina_vector_hash = sha256_hex(jina_vector_json.as_bytes());
+                let jina_profile =
+                    build_matryoshka_profile(&jina_provider, chunk, &jina_vector, jina_vector.len());
+                jina_stmt.execute(params![
                     chunk.id,
                     jina_provider,
                     jina_vector.len() as i64,
@@ -1665,31 +1669,33 @@ impl DataStore {
                     serde_json::to_string(&jina_profile.metadata_context)?,
                     jina_profile.colbert_token_hash,
                     now()
-                ],
-            )?;
-            lance_records.push(LanceVectorRecord {
-                id: chunk.id.clone(),
-                document_id: chunk.document_id.clone(),
-                text: chunk.text.clone(),
-                vector: jina_vector,
-                metadata: jina_profile.metadata_context,
-            });
+                ])?;
+                lance_records.push(LanceVectorRecord {
+                    id: chunk.id.clone(),
+                    document_id: chunk.document_id.clone(),
+                    text: chunk.text.clone(),
+                    vector: jina_vector,
+                    metadata: jina_profile.metadata_context,
+                });
+            }
+        }
 
-            if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref()
-                && let Some(embedding) = model2vec_embeddings.get(index)
-            {
-                let vector = embedding.clone();
-                let vector_json = serde_json::to_string(&vector)?;
-                let vector_hash = sha256_hex(vector_json.as_bytes());
-                let profile =
-                    build_matryoshka_profile(&model2vec_provider, chunk, &vector, vector.len());
-                tx.execute(
-                    "INSERT OR REPLACE INTO embeddings_model2vec(
-                            chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
-                            lexical_context, metadata_json, colbert_token_hash, created_at
-                         )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![
+        if let Some(model2vec_embeddings) = model2vec_embeddings.as_ref() {
+            let mut model2vec_stmt = tx.prepare(
+                "INSERT OR REPLACE INTO embeddings_model2vec(
+                    chunk_id, provider, dim, vector_json, vector_hash, matryoshka_json,
+                    lexical_context, metadata_json, colbert_token_hash, created_at
+                 )
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            )?;
+            for (index, chunk) in chunks.iter().enumerate() {
+                if let Some(embedding) = model2vec_embeddings.get(index) {
+                    let vector = embedding.clone();
+                    let vector_json = serde_json::to_string(&vector)?;
+                    let vector_hash = sha256_hex(vector_json.as_bytes());
+                    let profile =
+                        build_matryoshka_profile(&model2vec_provider, chunk, &vector, vector.len());
+                    model2vec_stmt.execute(params![
                         chunk.id,
                         &model2vec_provider,
                         vector.len() as i64,
@@ -1700,8 +1706,8 @@ impl DataStore {
                         serde_json::to_string(&profile.metadata_context)?,
                         profile.colbert_token_hash,
                         now()
-                    ],
-                )?;
+                    ])?;
+                }
             }
         }
         tx.commit()?;
@@ -3315,9 +3321,21 @@ fn to_json_opt<T: Serialize>(value: &Option<T>) -> Result<Option<String>> {
 
 fn hashed_embedding(text: &str, dim: usize) -> Vec<f32> {
     let mut vector = vec![0.0f32; dim.max(8)];
+    let len = vector.len();
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64];
+
     for token in text.split_whitespace() {
-        let digest = Sha256::digest(token.to_ascii_lowercase().as_bytes());
-        let idx = u64::from_le_bytes(digest[0..8].try_into().unwrap()) as usize % vector.len();
+        let n = token.len();
+        if n <= buf.len() {
+            buf[..n].copy_from_slice(token.as_bytes());
+            buf[..n].make_ascii_lowercase();
+            hasher.update(&buf[..n]);
+        } else {
+            hasher.update(token.to_ascii_lowercase().as_bytes());
+        }
+        let digest = hasher.finalize_reset();
+        let idx = u64::from_le_bytes(digest[0..8].try_into().unwrap()) as usize % len;
         let sign = if digest[8] & 1 == 0 { 1.0 } else { -1.0 };
         vector[idx] += sign;
     }
