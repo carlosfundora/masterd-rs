@@ -174,7 +174,7 @@ pub const MASTERD_MODEL_RUNTIME_SPECS: &[MasterdModelRuntimeSpec] = &[
         role: ModelRuntimeRole::Chat,
         asset_format: ModelAssetFormat::Gguf,
         preferred_runtime: PreferredRuntime::RustCandleGguf,
-        model_dir: "models/lfm2.5-1.2b-thinking",
+        model_dir: "/home/local/ai/models/registry/LiquidAI/LFM2.5-1.2B-Thinking-GGUF",
         weights: "LFM2.5-1.2B-Thinking-Q8_0.gguf",
         tokenizer: "tokenizer.json",
         min_weight_bytes: 1_000_000_000,
