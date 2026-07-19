@@ -15,6 +15,7 @@ use candle_transformers::models::quantized_lfm2::ModelWeights;
 use masterd_atom_runtime::{parse_gguf_header_bytes, synthesize_load_plan};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
 use tokio::sync::{RwLock, mpsc};
@@ -24,10 +25,11 @@ pub use masterd_index::{
     BM25Okapi, DocumentDeduper, IndexSnapshot, IndexedDocument, LocalIndex, SearchResult,
 };
 
-// ── Compile-time embedded assets ────────────────────────────────────────────
+// ── Model and embedded assets ───────────────────────────────────────────────
 
-/// LFM2.5-1.2B-Thinking GGUF — embedded at compile time (~1.3 GB in binary).
-static THINKING_GGUF: &[u8] = include_bytes!("../assets/models/thinking/model.gguf");
+/// Canonical deployed LFM2.5-1.2B-Thinking GGUF. It is loaded at runtime so
+/// clean source builds do not require a machine-local 1.3 GB file.
+static THINKING_GGUF_PATH: &str = "/home/local/ai/models/registry/LiquidAI/LFM2.5-1.2B-Thinking-GGUF/LFM2.5-1.2B-Thinking-Q8_0.gguf";
 
 /// LFM2.5-350M-Instruct GGUF — embedded at compile time (~375 MB in binary).
 static INSTRUCT_GGUF: &[u8] = include_bytes!("../assets/models/instruct/model.gguf");
@@ -107,9 +109,8 @@ struct LoadedModel {
 }
 
 impl LoadedModel {
-    /// Load from compile-time embedded bytes — no filesystem access.
-    fn from_embedded(
-        gguf_bytes: &'static [u8],
+    fn from_bytes(
+        gguf_bytes: &[u8],
         tokenizer_bytes: &'static [u8],
         chat_template: &'static str,
         label: &'static str,
@@ -163,8 +164,12 @@ impl LoadedModel {
             .to_vec();
         let persona_token_count = persona_tokens.len();
 
-        info!("pre-evaluating MASTERd persona prefix for {label} ({} tokens)...", persona_token_count);
-        let prefix_input = candle_core::Tensor::new(persona_tokens.as_slice(), &device)?.unsqueeze(0)?;
+        info!(
+            "pre-evaluating MASTERd persona prefix for {label} ({} tokens)...",
+            persona_token_count
+        );
+        let prefix_input =
+            candle_core::Tensor::new(persona_tokens.as_slice(), &device)?.unsqueeze(0)?;
         let _prefix_logits = weights.forward(&prefix_input, 0)?;
         let persona_cache = Some(weights.get_cache());
         weights.clear_cache();
@@ -179,6 +184,28 @@ impl LoadedModel {
             persona_token_count,
             persona_tokens,
         })
+    }
+
+    /// Load a deployed GGUF while keeping tokenizer/template assets embedded.
+    fn from_file(
+        path: &Path,
+        tokenizer_bytes: &'static [u8],
+        chat_template: &'static str,
+        label: &'static str,
+    ) -> Result<Self> {
+        let gguf_bytes = std::fs::read(path)
+            .with_context(|| format!("read deployed gguf for {label} from {}", path.display()))?;
+        Self::from_bytes(&gguf_bytes, tokenizer_bytes, chat_template, label)
+    }
+
+    /// Load a compile-time embedded GGUF.
+    fn from_embedded(
+        gguf_bytes: &'static [u8],
+        tokenizer_bytes: &'static [u8],
+        chat_template: &'static str,
+        label: &'static str,
+    ) -> Result<Self> {
+        Self::from_bytes(gguf_bytes, tokenizer_bytes, chat_template, label)
     }
 
     fn guess_eos(tok: &Tokenizer) -> u32 {
@@ -222,7 +249,7 @@ impl Default for ChatEngineConfig {
     }
 }
 
-/// The main chat engine. Models are lazy-loaded on first use from embedded bytes.
+/// The main chat engine. Models are lazy-loaded on first use.
 pub struct ChatEngine {
     config: ChatEngineConfig,
     thinking: Mutex<Option<LoadedModel>>,
@@ -301,8 +328,8 @@ impl ChatEngine {
     fn ensure_thinking(&self) -> Result<()> {
         let mut g = self.thinking.lock().unwrap();
         if g.is_none() {
-            *g = Some(LoadedModel::from_embedded(
-                THINKING_GGUF,
+            *g = Some(LoadedModel::from_file(
+                Path::new(THINKING_GGUF_PATH),
                 THINKING_TOKENIZER,
                 THINKING_CHAT_TEMPLATE,
                 "lfm2.5-thinking",
@@ -338,8 +365,8 @@ impl ChatEngine {
     /// Send a user message and stream tokens to `tx`.
     ///
     /// Execution order:
-    /// 1. Try embedded LFM2.5 model (compiled into the binary).
-    /// 2. If loading the embedded model fails, transparently fall back to
+    /// 1. Try the local LFM2.5 model.
+    /// 2. If loading the local model fails, transparently fall back to
     ///    a locally-running Ollama daemon if one is reachable.
     pub async fn chat(
         self: Arc<Self>,
@@ -388,7 +415,11 @@ impl ChatEngine {
                 generate(
                     g.as_mut().unwrap(),
                     if use_cache { "" } else { &full_prompt },
-                    if use_cache { Some(&suffix_prompt) } else { None },
+                    if use_cache {
+                        Some(&suffix_prompt)
+                    } else {
+                        None
+                    },
                     &cfg,
                     ThinkMode::Thinking,
                     tx2,
@@ -402,7 +433,11 @@ impl ChatEngine {
                 generate(
                     g.as_mut().unwrap(),
                     if use_cache { "" } else { &full_prompt },
-                    if use_cache { Some(&suffix_prompt) } else { None },
+                    if use_cache {
+                        Some(&suffix_prompt)
+                    } else {
+                        None
+                    },
                     &cfg,
                     ThinkMode::Instruct,
                     tx2,
@@ -489,27 +524,28 @@ fn generate(
     tx: mpsc::Sender<ChatToken>,
     citations: Vec<WebResult>,
 ) -> Result<String> {
-    let (all_tokens, start_pos, input_ids) = if let (Some(suffix), Some(cache)) = (suffix_prompt, &model.persona_cache) {
-        model.weights.set_cache(cache);
-        let suffix_ids: Vec<u32> = model
-            .tokenizer
-            .encode(suffix, true)
-            .map_err(|e| anyhow::anyhow!("encode suffix: {e}"))?
-            .get_ids()
-            .to_vec();
-        let mut tokens = model.persona_tokens.clone();
-        tokens.extend_from_slice(&suffix_ids);
-        (tokens, model.persona_token_count, suffix_ids)
-    } else {
-        model.weights.clear_cache();
-        let ids: Vec<u32> = model
-            .tokenizer
-            .encode(prompt, true)
-            .map_err(|e| anyhow::anyhow!("encode: {e}"))?
-            .get_ids()
-            .to_vec();
-        (ids.clone(), 0, ids)
-    };
+    let (all_tokens, start_pos, input_ids) =
+        if let (Some(suffix), Some(cache)) = (suffix_prompt, &model.persona_cache) {
+            model.weights.set_cache(cache);
+            let suffix_ids: Vec<u32> = model
+                .tokenizer
+                .encode(suffix, true)
+                .map_err(|e| anyhow::anyhow!("encode suffix: {e}"))?
+                .get_ids()
+                .to_vec();
+            let mut tokens = model.persona_tokens.clone();
+            tokens.extend_from_slice(&suffix_ids);
+            (tokens, model.persona_token_count, suffix_ids)
+        } else {
+            model.weights.clear_cache();
+            let ids: Vec<u32> = model
+                .tokenizer
+                .encode(prompt, true)
+                .map_err(|e| anyhow::anyhow!("encode: {e}"))?
+                .get_ids()
+                .to_vec();
+            (ids.clone(), 0, ids)
+        };
 
     let input = candle_core::Tensor::new(input_ids.as_slice(), &model.device)?.unsqueeze(0)?;
     let mut logits_proc = LogitsProcessor::from_sampling(
@@ -711,9 +747,9 @@ mod tests {
     }
 
     #[test]
-    fn gguf_bytes_are_embedded() {
-        // Just check magic bytes — we don't want to parse 1.6 GB in CI.
-        assert_eq!(&THINKING_GGUF[..4], b"GGUF", "thinking GGUF magic wrong");
+    fn model_asset_contracts_are_stable() {
+        assert!(THINKING_GGUF_PATH.ends_with("LFM2.5-1.2B-Thinking-Q8_0.gguf"));
+        // The smaller instruct model remains embedded.
         assert_eq!(&INSTRUCT_GGUF[..4], b"GGUF", "instruct GGUF magic wrong");
     }
 

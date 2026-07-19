@@ -12,14 +12,21 @@ apps/masterd-desktop-tauri/target/
 apps/masterd-ingest/target/
 apps/*/target/
 services/*/target/
+crates/*/target/
 **/*.rs.bk
 Cargo.lock.bak
 
 # ── Node / Next.js ────────────────────────────────────────────────────────
 node_modules/
+apps/*/node_modules/
 apps/masterd-shell/.next/
 apps/masterd-shell/out/
+apps/*/.next/
+apps/*/out/
+apps/*/dist/
+apps/*/build/
 .npm/
+.pnpm-store/
 
 # ── Runtime / database data ───────────────────────────────────────────────
 data/*.jsonl
@@ -38,15 +45,30 @@ dist/installer-bundles/*.rpm
 apps/masterd-desktop-tauri/binaries/meilisearch
 apps/masterd-desktop-tauri/binaries/valkey-server
 apps/masterd-desktop-tauri/modules/falkordb.so
+*.log
+*.tmp
+*.temp
 
 # ── Python / uv venvs ─────────────────────────────────────────────────────
 .venv/
+venv/
+.python-version
 services/*/.venv/
+**/.venv/
+**/venv/
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+build/
+**/build/
+*.egg-info/
+**/*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # ── Environment / secrets ─────────────────────────────────────────────────
 .env
@@ -74,3 +96,6 @@ vendor/candle/target/
 
 # ── Temporary build sources for sidecar binaries ─────────────────────────
 target/valkey-src/
+
+# ── Local reference imports / unpacked legacy snapshots ──────────────────
+apps/masterd-cli/references/

@@ -246,7 +246,7 @@ if [[ "${SKIP_CHAT}" == "0" ]]; then
   hf_download \
     "liquidai/LFM2.5-1.2B-Thinking-GGUF" \
     "LFM2.5-1.2B-Thinking-Q8_0.gguf" \
-    "${ROOT_DIR}/models/lfm2.5-1.2b-thinking/LFM2.5-1.2B-Thinking-Q8_0.gguf" \
+    "/home/local/ai/models/registry/LiquidAI/LFM2.5-1.2B-Thinking-GGUF/LFM2.5-1.2B-Thinking-Q8_0.gguf" \
     1000000000 \
     "LFM2.5-1.2B-Thinking GGUF"
   hf_download \
@@ -341,7 +341,7 @@ info ""
 info "── Copying models to embedded assets for Rust include_bytes! ──────────"
 
 if [[ "${SKIP_CHAT}" == "0" ]]; then
-  THINKING_SRC="${ROOT_DIR}/models/lfm2.5-1.2b-thinking/LFM2.5-1.2B-Thinking-Q8_0.gguf"
+  THINKING_SRC="/home/local/ai/models/registry/LiquidAI/LFM2.5-1.2B-Thinking-GGUF/LFM2.5-1.2B-Thinking-Q8_0.gguf"
   THINKING_TOK="${ROOT_DIR}/models/lfm2.5-1.2b-thinking/tokenizer.json"
   THINKING_TEMPLATE="${ROOT_DIR}/models/lfm2.5-1.2b-thinking/tokenizer.chat_template"
   THINKING_DST_DIR="${ROOT_DIR}/crates/masterd-chat-engine/assets/models/thinking"
@@ -361,7 +361,7 @@ if [[ "${SKIP_CHAT}" == "0" ]]; then
   verify_file "${INSTRUCT_TEMPLATE}" 100 "LFM2.5-350M-Instruct chat template"
 
   if [[ "${VERIFY_ONLY}" != "1" ]]; then
-    cp -v "${THINKING_SRC}" "${THINKING_DST_DIR}/model.gguf"
+    # Thinking GGUF stays canonical in /home/local/ai/models/registry; do not duplicate it into embedded assets.
     cp -v "${THINKING_TOK}" "${THINKING_DST_DIR}/tokenizer.json"
     cp -v "${THINKING_TEMPLATE}" "${THINKING_DST_DIR}/tokenizer.chat_template"
     cp -v "${INSTRUCT_SRC}" "${INSTRUCT_DST_DIR}/model.gguf"
@@ -369,7 +369,7 @@ if [[ "${SKIP_CHAT}" == "0" ]]; then
     cp -v "${INSTRUCT_TEMPLATE}" "${INSTRUCT_DST_DIR}/tokenizer.chat_template"
   fi
 
-  verify_file "${THINKING_DST_DIR}/model.gguf" 1000000000 "embedded thinking GGUF"
+  verify_file "${THINKING_SRC}" 1000000000 "canonical thinking GGUF"
   verify_file "${THINKING_DST_DIR}/tokenizer.json" 1000000 "embedded thinking tokenizer"
   verify_file "${THINKING_DST_DIR}/tokenizer.chat_template" 100 "embedded thinking chat template"
   verify_file "${INSTRUCT_DST_DIR}/model.gguf" 300000000 "embedded instruct GGUF"
